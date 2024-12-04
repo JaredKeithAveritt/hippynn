@@ -170,7 +170,6 @@ class MetaDatabase(Database):
         bins=50,
         alpha=0.7,
         **kwargs
-        **kwargs
     ):
         self.metadata = metadata.copy() if metadata else {}
         self.entry_metadata = entry_metadata.copy() if entry_metadata else {}
