@@ -934,11 +934,10 @@ class MetaDatabase(Database):
                 return mean - 3 * std, mean + 3 * std
             return None, None
 
-    
-        density_range = calculate_range(valid_densities)
-        max_force_range = calculate_range(valid_max_force)
-        min_distance_range = calculate_range(valid_min_distance)
-        max_distance_range = calculate_range(valid_max_distance)
+        density_range = calculate_range(valid_densities, self.density_range)
+        max_force_range = calculate_range(valid_max_force, self.max_force_range)
+        min_distance_range = calculate_range(valid_min_distance, self.min_distance_range)
+        max_distance_range = calculate_range(valid_max_distance, self.max_distance_range)
         
     # Ensure ranges are valid before plotting
         def valid_range(range_tuple):
