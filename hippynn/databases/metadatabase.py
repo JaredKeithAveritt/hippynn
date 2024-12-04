@@ -925,7 +925,7 @@ class MetaDatabase(Database):
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
         
         # Calculate ±3 standard deviations for the range
-       def calculate_range(data, manual_range):
+        def calculate_range(data, manual_range):
             if manual_range:
                 return manual_range
             if len(data) > 0:
