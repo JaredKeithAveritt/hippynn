@@ -105,7 +105,26 @@ class MetaDatabase(Database):
     >>> # Plot the Force Magnitude Distribution , Density Distribution and Pairwise Distance Distribution
     >>> meta_db.plot_distributions()
     
+    >>> # Update metadata with a single "Comments" key
+    >>> meta_db.update_metadata({"Comments": '' })
 
+    >>> # Remove "Input_Proceedure" key from metadata
+    >>> meta_db.remove_metadata("Input_Proceedure")
+
+    >>> # Print metadata
+    >>> meta_db.print_metadata()
+
+    >>> # Search for indicies out of all entries containing atleast Carbon 
+    >>> meta_db.search_entries_by_species(['C'], exact_match=False)
+    
+    >>> # Search for indicies out of all databaseentries containing exactly Hydrogen, Carbon and Oxygen
+    >>> meta_db.search_entries_by_species(['CHO'], exact_match=True)
+    
+    >>> # Search for indicies out of all database entries with a calculated maximum atomic force in the range of [0,0.1]
+    >>> meta_db.search_entries_by_max_force([0.0,0.1])
+
+    >>> # Search for indicies out of all database entries with a calculated maximum pairwise atomic distance in the range of [0,0.9]
+    >>> meta_db.search_entries_by_distance_range([0.0,0.9])
 
 
     **Key Functionalities:**
@@ -921,21 +940,39 @@ class MetaDatabase(Database):
         valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
         valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-    
+
+        # Calculate ±3 standard deviations for the range
+        def calculate_range(data):
+            if len(data) > 0:
+                mean = np.mean(data)
+                std = np.std(data)
+                return mean - 3 * std, mean + 3 * std
+            else:
+                return None, None
+
+        density_range = calculate_range(valid_densities)
+        max_force_range = calculate_range(valid_max_force)
+        min_distance_range = calculate_range(valid_min_distance)
+        max_distance_range = calculate_range(valid_max_distance)
+        
         # Create subplots for better visualization
         fig, axs = plt.subplots(1, 3, figsize=(18, 6))
-    
+
         # Density Distribution
         axs[0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
         axs[0].set_title("Density Distribution")
         axs[0].set_xlabel("Density")
         axs[0].set_ylabel("Frequency")
+        if density_range[0] is not None:
+            axs[0].set_xlim(density_range)
     
         # Force Magnitude Distribution
         axs[1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
         axs[1].set_title("Maximum Force Magnitude Distribution")
         axs[1].set_xlabel("Force Magnitude")
         axs[1].set_ylabel("Frequency")
+        if max_force_range[0] is not None:
+            axs[1].set_xlim(max_force_range)
     
         # Distance Distribution
         axs[2].hist(valid_min_distance, bins=50, alpha=0.7, color='green', label="Min Distance")
@@ -944,6 +981,11 @@ class MetaDatabase(Database):
         axs[2].set_xlabel("Atomic Distance")
         axs[2].set_ylabel("Frequency")
         axs[2].legend()
+        if min_distance_range[0] is not None and max_distance_range[0] is not None:
+            axs[2].set_xlim(
+                min(min_distance_range[0], max_distance_range[0]),
+                max(min_distance_range[1], max_distance_range[1])
+            )
     
         # Adjust layout and show plot
         plt.tight_layout()
