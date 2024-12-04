@@ -883,13 +883,17 @@ class MetaDatabase(Database):
             self.calculate_max_force()
 
         # Ensure min and max distances are calculated
-        if self.min_distance is None or self.max_distance is None:
+        if self.min_distance is None :
             self.calculate_min_distance()
+
+        if self.max_distance is None:
             self.calculate_max_distance()
 
-        # Filter valid densities
-        valid_densities = [d for d in self.densities if d is not None and not np.isnan(d)]
-
+        # Filter valid values
+        valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
+        valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
+        valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
+        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
         # Create subplots for better visualization
         fig, axs = plt.subplots(1, 3, figsize=(18, 6))
 
@@ -931,16 +935,21 @@ class MetaDatabase(Database):
             self.calculate_max_force()
     
         # Ensure min and max distances are calculated
-        if self.min_distance is None or self.max_distance is None:
+        if self.min_distance is None :
             self.calculate_min_distance()
+
+        if self.max_distance is None:
             self.calculate_max_distance()
-    
+            
         # Filter valid values for plotting
         valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
         valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
         valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-    
+
+        # Debugging output
+        print(f"valid_max_distance: {valid_max_distance}")
+        
         # Calculate ±3 standard deviations for the range
         def calculate_range(data):
             if len(data) > 0:
@@ -954,10 +963,11 @@ class MetaDatabase(Database):
         max_force_range = calculate_range(valid_max_force)
         min_distance_range = calculate_range(valid_min_distance)
         max_distance_range = calculate_range(valid_max_distance)
-    
-        # Ensure ranges are valid before plotting
+        
+    # Ensure ranges are valid before plotting
         def valid_range(range_tuple):
             return range_tuple if range_tuple[0] is not None and range_tuple[1] is not None else (0, 1)
+
     
         density_range = valid_range(density_range)
         max_force_range = valid_range(max_force_range)
@@ -968,28 +978,28 @@ class MetaDatabase(Database):
     
         # Density Distribution
         axs[0, 0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
-        axs[0, 0].set_title("Density Distribution")
+        axs[0, 0].set_title("Density Distribution ±3 standard deviations")
         axs[0, 0].set_xlabel("Density")
         axs[0, 0].set_ylabel("Frequency")
         axs[0, 0].set_xlim(density_range)
     
         # Force Magnitude Distribution
         axs[0, 1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
-        axs[0, 1].set_title("Maximum Force Magnitude Distribution")
+        axs[0, 1].set_title("Maximum Force Magnitude Distribution ±3 standard deviations")
         axs[0, 1].set_xlabel("Force Magnitude")
         axs[0, 1].set_ylabel("Frequency")
         axs[0, 1].set_xlim(max_force_range)
     
         # Min Distance Distribution
         axs[1, 0].hist(valid_min_distance, bins=50, alpha=0.7, color='green')
-        axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution")
+        axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution ±3 standard deviations")
         axs[1, 0].set_xlabel("Min Pairwise Atomic Distance")
         axs[1, 0].set_ylabel("Frequency")
         axs[1, 0].set_xlim(min_distance_range)
     
         # Max Distance Distribution
         axs[1, 1].hist(valid_max_distance, bins=50, alpha=0.7, color='purple')
-        axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution")
+        axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution ±3 standard deviations")
         axs[1, 1].set_xlabel("Max Atomic Distance")
         axs[1, 1].set_ylabel("Frequency")
         axs[1, 1].set_xlim(max_distance_range)
