@@ -16,7 +16,7 @@ import numpy as np
 from collections import defaultdict, Counter
 from itertools import islice 
 import re
-from .databases import Database
+from .database import Database
 
 class MetaDatabase(Database):
     """
