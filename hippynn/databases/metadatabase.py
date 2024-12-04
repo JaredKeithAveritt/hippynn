@@ -8,6 +8,7 @@ and visualization.
 
 Designed for easy extension with additional metadata calculations and visualization methods.
 """
+from .database import Database
 
 from ase.data import atomic_masses, chemical_symbols
 from ase.units import _amu
@@ -16,7 +17,7 @@ import numpy as np
 from collections import defaultdict, Counter
 from itertools import islice 
 import re
-from .database import Database
+import matplotlib.pyplot as plt  
 
 class MetaDatabase(Database):
     """
@@ -83,11 +84,11 @@ class MetaDatabase(Database):
     >>>    "Electronic_Structure_Package_Version" : '6.4.3',
     >>>    "Computer_System" : 'LANL',
     >>>    "Input_Procedure" : { 
-    >>>       "ENCUT": '',
-              "ALGO": '',
-              "SIGMA": '',
-              "KPAR": ''
-              }
+    >>>        "ENCUT": '',
+    >>>        "ALGO": '',
+    >>>        "SIGMA": '',
+    >>>        "KPAR": ''
+    >>>     }
     >>> },
     >>> populate_metadata=True,
     >>> write_metadata_to_json=True,
@@ -101,14 +102,10 @@ class MetaDatabase(Database):
     >>> # Search for entries with density between 1.0 and 5.0
     >>> results = meta_db.search({'density': {'min': 1.0, 'max': 5.0}})
     
-    >>> # Plot the density distribution
-    >>> meta_db.plot_density_distribution()
+    >>> # Plot the Force Magnitude Distribution , Density Distribution and Pairwise Distance Distribution
+    >>> meta_db.plot_distributions()
     
-    >>> # Plot atom counts
-    >>> meta_db.plot_atom_counts()
-    
-    >>> # Plot coordinates for a specific entry
-    >>> meta_db.plot_coordinates(entry_id=42)
+
 
 
     **Key Functionalities:**
