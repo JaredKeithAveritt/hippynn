@@ -850,7 +850,7 @@ class MetaDatabase(Database):
         with open(self.json_filename, "w") as f:
             json.dump(json_compatible_metadata, f, indent=4)
 
-    def plot_distributions(self):
+    def OLD_plot_distributions(self):
         import matplotlib.pyplot as plt
         """
         Plots the distributions of densities, force magnitudes, and atomic distances.
@@ -897,3 +897,55 @@ class MetaDatabase(Database):
         # Adjust layout and show plot
         plt.tight_layout()
         plt.show()
+
+
+    def plot_distributions(self):
+        import matplotlib.pyplot as plt
+        import numpy as np
+    
+        # Ensure densities are calculated
+        if self.densities is None:
+            self.calculate_densities()
+    
+        # Ensure max force is calculated
+        if self.max_force is None:
+            self.calculate_max_force()
+    
+        # Ensure min and max distances are calculated
+        if self.min_distance is None or self.max_distance is None:
+            self.calculate_min_distance()
+            self.calculate_max_distance()
+    
+        # Filter valid values for plotting
+        valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
+        valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
+        valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
+        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
+    
+        # Create subplots for better visualization
+        fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+    
+        # Density Distribution
+        axs[0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
+        axs[0].set_title("Density Distribution")
+        axs[0].set_xlabel("Density")
+        axs[0].set_ylabel("Frequency")
+    
+        # Force Magnitude Distribution
+        axs[1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
+        axs[1].set_title("Maximum Force Magnitude Distribution")
+        axs[1].set_xlabel("Force Magnitude")
+        axs[1].set_ylabel("Frequency")
+    
+        # Distance Distribution
+        axs[2].hist(valid_min_distance, bins=50, alpha=0.7, color='green', label="Min Distance")
+        axs[2].hist(valid_max_distance, bins=50, alpha=0.7, color='purple', label="Max Distance")
+        axs[2].set_title("Atomic Distance Distribution")
+        axs[2].set_xlabel("Atomic Distance")
+        axs[2].set_ylabel("Frequency")
+        axs[2].legend()
+    
+        # Adjust layout and show plot
+        plt.tight_layout()
+        plt.show()
+    
