@@ -851,6 +851,7 @@ class MetaDatabase(Database):
             json.dump(json_compatible_metadata, f, indent=4)
 
     def plot_distributions(self):
+        import matplotlib.pyplot as plt
         """
         Plots the distributions of densities, force magnitudes, and atomic distances.
         """
