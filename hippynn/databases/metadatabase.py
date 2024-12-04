@@ -63,7 +63,7 @@ class MetaDatabase(Database):
     Examples
     --------
     >>> # Initialize MetaDatabase with an existing database object
-    >>> meta_db = MetaDatabase(
+    >>> meta_db = metadatabase.MetaDatabase(
     >>> arr_dict = db.arr_dict,
     >>> inputs=inputs,
     >>> targets=targets,
@@ -981,7 +981,6 @@ class MetaDatabase(Database):
         if min_distance_range[0] is not None :
             axs[1, 0].set_xlim(
                 min(min_distance_range[0], max_distance_range[0]),
-                max(min_distance_range[1], max_distance_range[1])
             )
 
         # Max Distance Distribution
