@@ -128,6 +128,16 @@ class MetaDatabase(Database):
     >>> # Search for indicies out of all database entries with a calculated maximum pairwise atomic distance in the range of [0,0.9]
     >>> meta_db.search_entries_by_distance_range([0.0,0.9])
 
+    >>> # Override plot settings
+    >>> meta_db.plot_distributions(
+    >>> density_range=(3, 4.5),  
+    >>> max_force_range=(0, 5),   
+    >>> min_distance_range=(0, 1), 
+    >>> max_distance_range=(0, 10),
+    >>> bins=30,                   
+    >>> alpha=0.5                  
+    >>> )
+
 
     **Key Functionalities:**
 
