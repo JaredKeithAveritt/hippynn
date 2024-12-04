@@ -377,7 +377,54 @@ class MetaDatabase(Database):
 
 
 
+
     def calculate_max_distance(self):
+        """
+        Compute the maximum pairwise atomic distance in each structure (i.e., entry in the database).
+    
+        Returns:
+            max_distances: A list containing the maximum pairwise atomic distance for each entry.
+        """
+        max_distances = []
+    
+        for i, structure_coords in enumerate(self.arr_dict[self.coordinates_key]):
+            # Filter out invalid atoms (species == 0)
+            valid_indices = np.where(self.arr_dict[self.species_key][i] != 0)[0]
+            valid_coords = structure_coords[valid_indices]
+    
+            # Skip entries with fewer than two valid atoms
+            num_atoms = valid_coords.shape[0]
+            if num_atoms < 2:
+                max_distances.append(None)  # Use None to explicitly mark invalid entries
+                continue
+    
+            # Compute pairwise distances
+            diff = valid_coords[:, np.newaxis, :] - valid_coords[np.newaxis, :, :]
+            dist_matrix = np.sqrt(np.sum(diff**2, axis=2))
+    
+            # Ignore self-distances by masking the diagonal
+            np.fill_diagonal(dist_matrix, -np.inf)
+    
+            # Find the maximum distance
+            max_distance = np.max(dist_matrix)
+            if np.isfinite(max_distance):
+                max_distances.append(max_distance)
+            else:
+                max_distances.append(None)  # Use None if no valid max distance is found
+    
+        self.max_distance = max_distances
+        return max_distances
+
+
+
+
+
+
+
+
+    
+
+    def OLD_calculate_max_distance(self):
         """
         For a given database entry, compute the maximum pairwise atomic distance in each structure (i.e. entry in the database).
 
