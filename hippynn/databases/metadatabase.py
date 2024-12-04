@@ -416,45 +416,6 @@ class MetaDatabase(Database):
         return max_distances
 
 
-
-
-
-
-
-
-    
-
-    def OLD_calculate_max_distance(self):
-        """
-        For a given database entry, compute the maximum pairwise atomic distance in each structure (i.e. entry in the database).
-
-        Returns:
-            max_distances: A list containing the maximum pairwise atomic distance for each entry in the database.
-        """
-        max_distances = [] 
-        
-        for i, structure_coords in enumerate(self.arr_dict[self.coordinates_key]):
-            valid_indices = np.where(self.arr_dict[self.species_key][i] != 0)[0] # Filters out non-atoms (species == 0)
-            valid_coords = structure_coords[valid_indices]
-            
-            # Compute pairwise distances
-            num_atoms = valid_coords.shape[0]
-            if num_atoms < 2:
-                max_distances.append(np.inf)  # No valid distances in single-atom or empty database entry
-                continue
-            
-            # Calculate distance matrix
-            diff = valid_coords[:, np.newaxis, :] - valid_coords[np.newaxis, :, :]
-            dist_matrix = np.sqrt(np.sum(diff**2, axis=2))
-            
-            # Mask diagonal (self-distances)
-            np.fill_diagonal(dist_matrix, np.inf)
-            
-            # Find the maximum distance
-            max_distances.append(np.max(dist_matrix))
-        
-        self.max_distance = max_distances
-        return max_distances
         
         
     def calculate_min_distance(self):
@@ -915,58 +876,6 @@ class MetaDatabase(Database):
         json_compatible_metadata = self.make_json_serializable()
         with open(self.json_filename, "w") as f:
             json.dump(json_compatible_metadata, f, indent=4)
-
-    def OLD_plot_distributions(self):
-        import matplotlib.pyplot as plt
-        """
-        Plots the distributions of densities, force magnitudes, and atomic distances.
-        """
-        # Ensure densities are calculated
-        if self.densities is None:
-            self.calculate_densities()
-
-        # Ensure max force is calculated
-        if self.max_force is None:
-            self.calculate_max_force()
-
-        # Ensure min and max distances are calculated
-        if self.min_distance is None :
-            self.calculate_min_distance()
-
-        if self.max_distance is None:
-            self.calculate_max_distance()
-
-        # Filter valid values
-        valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
-        valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
-        valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
-        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-        # Create subplots for better visualization
-        fig, axs = plt.subplots(1, 3, figsize=(18, 6))
-
-        # Density Distribution
-        axs[0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
-        axs[0].set_title("Density Distribution")
-        axs[0].set_xlabel("Density ")
-        axs[0].set_ylabel("Frequency")
-
-        # Force Magnitude Distribution
-        axs[1].hist(self.max_force, bins=50, alpha=0.7, color='orange')
-        axs[1].set_title("Maximum Force Magnitude Distribution")
-        axs[1].set_xlabel("Force Magnitude ")
-        axs[1].set_ylabel("Frequency")
-
-        # Distance Distribution
-        axs[2].hist(self.min_distance, bins=50, alpha=0.7, color='green', label="Min Distance")
-        axs[2].hist(self.max_distance, bins=50, alpha=0.7, color='purple', label="Max Distance")
-        axs[2].set_title("Atomic Distance Distribution")
-        axs[2].set_xlabel("Atomic Distance")
-        axs[2].set_ylabel("Frequency")
-        axs[2].legend()
-
-        # Adjust layout and show plot
-        plt.tight_layout()
-        plt.show()
 
 
     def plot_distributions(self):
