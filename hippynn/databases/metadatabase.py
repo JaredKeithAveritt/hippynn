@@ -940,7 +940,7 @@ class MetaDatabase(Database):
         valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
         valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-
+    
         # Calculate ±3 standard deviations for the range
         def calculate_range(data):
             if len(data) > 0:
@@ -949,45 +949,56 @@ class MetaDatabase(Database):
                 return mean - 3 * std, mean + 3 * std
             else:
                 return None, None
-
+    
         density_range = calculate_range(valid_densities)
         max_force_range = calculate_range(valid_max_force)
         min_distance_range = calculate_range(valid_min_distance)
         max_distance_range = calculate_range(valid_max_distance)
-        
-        # Create subplots for better visualization
-        fig, axs = plt.subplots(1, 3, figsize=(18, 6))
-
+    
+        fig, axs = plt.subplots(2, 2, figsize=(18, 12)) 
+    
         # Density Distribution
-        axs[0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
-        axs[0].set_title("Density Distribution")
-        axs[0].set_xlabel("Density")
-        axs[0].set_ylabel("Frequency")
+        axs[0, 0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
+        axs[0, 0].set_title("Density Distribution")
+        axs[0, 0].set_xlabel("Density")
+        axs[0, 0].set_ylabel("Frequency")
         if density_range[0] is not None:
-            axs[0].set_xlim(density_range)
+            axs[0, 0].set_xlim(density_range)
     
         # Force Magnitude Distribution
-        axs[1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
-        axs[1].set_title("Maximum Force Magnitude Distribution")
-        axs[1].set_xlabel("Force Magnitude")
-        axs[1].set_ylabel("Frequency")
+        axs[0, 1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
+        axs[0, 1].set_title("Maximum Force Magnitude Distribution")
+        axs[0, 1].set_xlabel("Force Magnitude")
+        axs[0, 1].set_ylabel("Frequency")
         if max_force_range[0] is not None:
-            axs[1].set_xlim(max_force_range)
+            axs[0, 1].set_xlim(max_force_range)
     
         # Distance Distribution
-        axs[2].hist(valid_min_distance, bins=50, alpha=0.7, color='green', label="Min Distance")
-        axs[2].hist(valid_max_distance, bins=50, alpha=0.7, color='purple', label="Max Distance")
-        axs[2].set_title("Atomic Distance Distribution")
-        axs[2].set_xlabel("Atomic Distance")
-        axs[2].set_ylabel("Frequency")
-        axs[2].legend()
+        axs[1, 0].hist(valid_min_distance, bins=50, alpha=0.7, color='green', label="Min Distance")
+        axs[1, 0].hist(valid_max_distance, bins=50, alpha=0.7, color='purple', label="Max Distance")
+        axs[1, 0].set_title("Atomic Distance Distribution")
+        axs[1, 0].set_xlabel("Atomic Distance")
+        axs[1, 0].set_ylabel("Frequency")
+        axs[1, 0].legend()
         if min_distance_range[0] is not None and max_distance_range[0] is not None:
-            axs[2].set_xlim(
+            axs[1, 0].set_xlim(
                 min(min_distance_range[0], max_distance_range[0]),
                 max(min_distance_range[1], max_distance_range[1])
             )
     
-        # Adjust layout and show plot
+        # Atom Counts by Symbol
+        atom_counts_by_symbol = self.get_atom_counts_by_symbol()  
+        symbols = list(atom_counts_by_symbol.keys())
+        counts = list(atom_counts_by_symbol.values())
+    
+        axs[1, 1].bar(symbols, counts, color='skyblue', alpha=0.8)
+        axs[1, 1].set_title("Atom Counts by Symbol")
+        axs[1, 1].set_xlabel("Element Symbol")
+        axs[1, 1].set_ylabel("Atom Count")
+        for i, count in enumerate(counts):
+            axs[1, 1].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
+    
         plt.tight_layout()
+        plt.savefig("database_distribution.png") 
         plt.show()
     
