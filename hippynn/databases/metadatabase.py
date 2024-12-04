@@ -964,7 +964,7 @@ class MetaDatabase(Database):
         fig, axs = plt.subplots(3, 2, figsize=(18, 12)) 
     
         # Density Distribution
-        axs[0, 0].hist(valid_densities, bins=self.bins, alpha=self.alpha, color='blue')
+        axs[0, 0].hist(valid_densities, bins=bins, alpha=alpha, color='blue')
         axs[0, 0].set_title("Density Distribution")
         axs[0, 0].set_xlabel("Density")
         axs[0, 0].set_ylabel("Frequency")
@@ -972,7 +972,7 @@ class MetaDatabase(Database):
             axs[0, 0].set_xlim(density_range)
 
         # Force Magnitude Distribution
-        axs[0, 1].hist(valid_max_force, bins=self.bins, alpha=self.alpha, color='orange')
+        axs[0, 1].hist(valid_max_force, bins=bins, alpha=alpha, color='orange')
         axs[0, 1].set_title("Maximum Force Magnitude Distribution")
         axs[0, 1].set_xlabel("Force Magnitude")
         axs[0, 1].set_ylabel("Frequency")
@@ -980,7 +980,7 @@ class MetaDatabase(Database):
             axs[0, 1].set_xlim(max_force_range)
 
         # Min Distance Distribution
-        axs[1, 0].hist(valid_min_distance, bins=self.bins, alpha=self.alpha, color='green')
+        axs[1, 0].hist(valid_min_distance, bins=bins, alpha=alpha, color='green')
         axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution")
         axs[1, 0].set_xlabel("Min Pairwise Distance")
         axs[1, 0].set_ylabel("Frequency")
@@ -988,7 +988,7 @@ class MetaDatabase(Database):
             axs[1, 0].set_xlim(min_distance_range)
 
         # Max Distance Distribution
-        axs[1, 1].hist(valid_max_distance, bins=self.bins, alpha=self.alpha, color='purple')
+        axs[1, 1].hist(valid_max_distance, bins=bins, alpha=alpha, color='purple')
         axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution")
         axs[1, 1].set_xlabel("Max Pairwise Distance")
         axs[1, 1].set_ylabel("Frequency")
@@ -1001,7 +1001,7 @@ class MetaDatabase(Database):
         symbols = list(atom_counts_by_symbol.keys())
         counts = list(atom_counts_by_symbol.values())
     
-        axs[2, 0].bar(symbols, counts, color='skyblue', alpha=0.8)
+        axs[2, 0].bar(symbols, counts, color='skyblue', alpha=alpha)
         axs[2, 0].set_title("Atom Counts by Symbol")
         axs[2, 0].set_xlabel("Element Symbol")
         axs[2, 0].set_ylabel("Atom Count")
