@@ -19,7 +19,7 @@ import re
 from .databases import Database
 
 class MetaDatabase(Database):
-      """
+    """
     MetaDatabase
 
     A class to parse a database object and generate a metadata representation.
