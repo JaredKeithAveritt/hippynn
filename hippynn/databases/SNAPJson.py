@@ -114,7 +114,7 @@ class SNAPDirectoryDatabase(Database, Restartable):
     def process_configs(self, configs, n_atoms_max):
 
         arr_dict = {}
-        all_keys = "AtomTypes", "Energy", "Forces", "Lattice", "Positions", "Group", "FileName", "SubConfig"
+        all_keys = "AtomTypes", "Energy", "Forces", "Stress", "Lattice", "Positions", "Group", "FileName", "SubConfig"
         pad_keys = "AtomTypes", "Forces", "Positions"
         for key in all_keys:
             value_list = [c[key] for c in configs]
