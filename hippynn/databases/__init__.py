@@ -11,7 +11,7 @@ Organized datasets for training and prediction.
 """
 from .database import Database
 from .ondisk import DirectoryDatabase, NPZDatabase
-from .metadata_izer import MetaDatabase
+from .metadatabase import MetaDatabase
 has_ase = False
 try: 
     import ase
