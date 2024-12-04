@@ -898,8 +898,15 @@ class MetaDatabase(Database):
         with open(self.json_filename, "w") as f:
             json.dump(json_compatible_metadata, f, indent=4)
 
-
-    def plot_distributions(self):
+    def plot_distributions(
+        self,
+        density_range=None,
+        max_force_range=None,
+        min_distance_range=None,
+        max_distance_range=None,
+        bins=None,
+        alpha=None,
+    ):
         import matplotlib.pyplot as plt
         import numpy as np
     
@@ -934,10 +941,15 @@ class MetaDatabase(Database):
                 return mean - 3 * std, mean + 3 * std
             return None, None
 
-        density_range = calculate_range(valid_densities, self.density_range)
-        max_force_range = calculate_range(valid_max_force, self.max_force_range)
-        min_distance_range = calculate_range(valid_min_distance, self.min_distance_range)
-        max_distance_range = calculate_range(valid_max_distance, self.max_distance_range)
+        # Determine ranges
+        density_range = calculate_range(valid_densities, density_range or self.density_range)
+        max_force_range = calculate_range(valid_max_force, max_force_range or self.max_force_range)
+        min_distance_range = calculate_range(valid_min_distance, min_distance_range or self.min_distance_range)
+        max_distance_range = calculate_range(valid_max_distance, max_distance_range or self.max_distance_range)
+    
+        # Use defaults if bins and alpha are not provided
+        bins = bins or self.bins
+        alpha = alpha or self.alpha
         
     # Ensure ranges are valid before plotting
         def valid_range(range_tuple):
