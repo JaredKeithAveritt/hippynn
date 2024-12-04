@@ -955,7 +955,7 @@ class MetaDatabase(Database):
         min_distance_range = calculate_range(valid_min_distance)
         max_distance_range = calculate_range(valid_max_distance)
     
-        fig, axs = plt.subplots(2, 2, figsize=(18, 12)) 
+        fig, axs = plt.subplots(3, 2, figsize=(18, 12)) 
     
         # Density Distribution
         axs[0, 0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
@@ -973,30 +973,39 @@ class MetaDatabase(Database):
         if max_force_range[0] is not None:
             axs[0, 1].set_xlim(max_force_range)
     
-        # Distance Distribution
-        axs[1, 0].hist(valid_min_distance, bins=50, alpha=0.7, color='green', label="Min Distance")
-        axs[1, 0].hist(valid_max_distance, bins=50, alpha=0.7, color='purple', label="Max Distance")
-        axs[1, 0].set_title("Atomic Distance Distribution")
-        axs[1, 0].set_xlabel("Atomic Distance")
+        # Min Distance Distribution
+        axs[1, 0].hist(valid_min_distance, bins=50, alpha=0.7, color='green')
+        axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution")
+        axs[1, 0].set_xlabel("Min Pairwise Atomic Distance")
         axs[1, 0].set_ylabel("Frequency")
-        axs[1, 0].legend()
-        if min_distance_range[0] is not None and max_distance_range[0] is not None:
+        if min_distance_range[0] is not None :
             axs[1, 0].set_xlim(
                 min(min_distance_range[0], max_distance_range[0]),
                 max(min_distance_range[1], max_distance_range[1])
             )
-    
+
+        # Max Distance Distribution
+        axs[1, 1].hist(valid_max_distance, bins=50, alpha=0.7, color='purple')
+        axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution")
+        axs[1, 1].set_xlabel("Max Atomic Distance")
+        axs[1, 1].set_ylabel("Frequency")
+        if max_distance_range[0] is not None:
+            axs[1, 1].set_xlim(
+                max(min_distance_range[1], max_distance_range[1])
+            )
+        
+
         # Atom Counts by Symbol
         atom_counts_by_symbol = self.get_atom_counts_by_symbol()  
         symbols = list(atom_counts_by_symbol.keys())
         counts = list(atom_counts_by_symbol.values())
     
-        axs[1, 1].bar(symbols, counts, color='skyblue', alpha=0.8)
-        axs[1, 1].set_title("Atom Counts by Symbol")
-        axs[1, 1].set_xlabel("Element Symbol")
-        axs[1, 1].set_ylabel("Atom Count")
+        axs[2, 0].bar(symbols, counts, color='skyblue', alpha=0.8)
+        axs[2, 0].set_title("Atom Counts by Symbol")
+        axs[2, 0].set_xlabel("Element Symbol")
+        axs[2, 0].set_ylabel("Atom Count")
         for i, count in enumerate(counts):
-            axs[1, 1].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
+            axs[2, 0].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
     
         plt.tight_layout()
         plt.savefig("database_distribution.png") 
