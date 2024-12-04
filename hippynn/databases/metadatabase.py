@@ -955,6 +955,15 @@ class MetaDatabase(Database):
         min_distance_range = calculate_range(valid_min_distance)
         max_distance_range = calculate_range(valid_max_distance)
     
+        # Ensure ranges are valid before plotting
+        def valid_range(range_tuple):
+            return range_tuple if range_tuple[0] is not None and range_tuple[1] is not None else (0, 1)
+    
+        density_range = valid_range(density_range)
+        max_force_range = valid_range(max_force_range)
+        min_distance_range = valid_range(min_distance_range)
+        max_distance_range = valid_range(max_distance_range)
+    
         fig, axs = plt.subplots(3, 2, figsize=(18, 12)) 
     
         # Density Distribution
@@ -962,38 +971,29 @@ class MetaDatabase(Database):
         axs[0, 0].set_title("Density Distribution")
         axs[0, 0].set_xlabel("Density")
         axs[0, 0].set_ylabel("Frequency")
-        if density_range[0] is not None:
-            axs[0, 0].set_xlim(density_range)
+        axs[0, 0].set_xlim(density_range)
     
         # Force Magnitude Distribution
         axs[0, 1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
         axs[0, 1].set_title("Maximum Force Magnitude Distribution")
         axs[0, 1].set_xlabel("Force Magnitude")
         axs[0, 1].set_ylabel("Frequency")
-        if max_force_range[0] is not None:
-            axs[0, 1].set_xlim(max_force_range)
+        axs[0, 1].set_xlim(max_force_range)
     
         # Min Distance Distribution
         axs[1, 0].hist(valid_min_distance, bins=50, alpha=0.7, color='green')
         axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution")
         axs[1, 0].set_xlabel("Min Pairwise Atomic Distance")
         axs[1, 0].set_ylabel("Frequency")
-        if min_distance_range[0] is not None :
-            axs[1, 0].set_xlim(
-                min(min_distance_range[0], max_distance_range[0]),
-            )
-
+        axs[1, 0].set_xlim(min_distance_range)
+    
         # Max Distance Distribution
         axs[1, 1].hist(valid_max_distance, bins=50, alpha=0.7, color='purple')
         axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution")
         axs[1, 1].set_xlabel("Max Atomic Distance")
         axs[1, 1].set_ylabel("Frequency")
-        if max_distance_range[0] is not None:
-            axs[1, 1].set_xlim(
-                max(min_distance_range[1], max_distance_range[1])
-            )
-        
-
+        axs[1, 1].set_xlim(max_distance_range)
+    
         # Atom Counts by Symbol
         atom_counts_by_symbol = self.get_atom_counts_by_symbol()  
         symbols = list(atom_counts_by_symbol.keys())
@@ -1006,7 +1006,10 @@ class MetaDatabase(Database):
         for i, count in enumerate(counts):
             axs[2, 0].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
     
+        # Hide the last unused subplot
+        axs[2, 1].axis('off')
+    
         plt.tight_layout()
         plt.savefig("database_distribution.png") 
         plt.show()
-    
+
