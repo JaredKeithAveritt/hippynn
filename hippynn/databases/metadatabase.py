@@ -93,6 +93,7 @@ class MetaDatabase(Database):
     >>> populate_metadata=True,
     >>> write_metadata_to_json=True,
     >>> json_filename='metadata.json',
+    >>> distribution_plots=True,
     >>> )
     
     >>> # Calculate atom counts and densities
@@ -160,6 +161,7 @@ class MetaDatabase(Database):
         populate_metadata=True,
         write_metadata_to_json=True,
         json_filename='metadata.json',
+        distribution_plots=False,  
         **kwargs
     ):
         self.metadata = metadata.copy() if metadata else {}
@@ -177,6 +179,7 @@ class MetaDatabase(Database):
         self.forces_key = forces_key
         self.write_metadata_to_json = write_metadata_to_json
         self.json_filename = json_filename
+        self.distribution_plots = distribution_plots 
 
         self.atomic_numbers_in_dataset = None
         self.element_combinations = None
@@ -188,9 +191,11 @@ class MetaDatabase(Database):
         self.max_distance = None
         self.min_distance = None
       
-        # Populate metadata if specified, otherwise call after instantiation
         if populate_metadata:
             self.populate_metadata(update=True, quiet=False)
+
+        if self.distribution_plots:
+            self.plot_distributions() 
             
     #
     #  Entry level Metadata
