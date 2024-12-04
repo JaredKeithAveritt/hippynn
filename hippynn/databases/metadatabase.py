@@ -822,8 +822,8 @@ class MetaDatabase(Database):
         # Save metadata to JSON if enabled
         if self.write_metadata_to_json:
             self.save_metadata_to_json()
-
- def make_json_serializable(self):
+    
+    def make_json_serializable(self):
         """
         Converts the metadata into a JSON-compatible format.
         """
@@ -853,7 +853,7 @@ class MetaDatabase(Database):
         with open(self.json_filename, "w") as f:
             json.dump(json_compatible_metadata, f, indent=4)
 
-    def FUTURE_plot_distributions(self):
+    def plot_distributions(self):
         """
         Plots the distributions of densities, force magnitudes, and atomic distances.
         """
