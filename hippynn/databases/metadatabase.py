@@ -63,6 +63,7 @@ class MetaDatabase(Database):
     Examples
     --------
     >>> # Initialize MetaDatabase with an existing database object
+    >>> from hippynn.databases import metadatabase
     >>> meta_db = metadatabase.MetaDatabase(
     >>> arr_dict = db.arr_dict,
     >>> inputs=inputs,
@@ -93,7 +94,7 @@ class MetaDatabase(Database):
     >>> populate_metadata=True,
     >>> write_metadata_to_json=True,
     >>> json_filename='metadata.json',
-    >>> distribution_plots=True,
+    >>> distribution_plots=False,
     >>> )
     
     >>> # Calculate atom counts and densities
@@ -162,6 +163,13 @@ class MetaDatabase(Database):
         write_metadata_to_json=True,
         json_filename='metadata.json',
         distribution_plots=False,  
+        density_range=None,
+        max_force_range=None,
+        min_distance_range=None,
+        max_distance_range=None,
+        bins=50,
+        alpha=0.7,
+        **kwargs
         **kwargs
     ):
         self.metadata = metadata.copy() if metadata else {}
@@ -190,7 +198,16 @@ class MetaDatabase(Database):
         self.min_force = None
         self.max_distance = None
         self.min_distance = None
-      
+
+        # Distribution plot settings
+        self.distribution_plots = distribution_plots
+        self.density_range = density_range
+        self.max_force_range = max_force_range
+        self.min_distance_range = min_distance_range
+        self.max_distance_range = max_distance_range
+        self.bins = bins
+        self.alpha = alpha
+        
         if populate_metadata:
             self.populate_metadata(update=True, quiet=False)
 
@@ -909,13 +926,15 @@ class MetaDatabase(Database):
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
         
         # Calculate ±3 standard deviations for the range
-        def calculate_range(data):
+       def calculate_range(data, manual_range):
+            if manual_range:
+                return manual_range
             if len(data) > 0:
                 mean = np.mean(data)
                 std = np.std(data)
                 return mean - 3 * std, mean + 3 * std
-            else:
-                return None, None
+            return None, None
+
     
         density_range = calculate_range(valid_densities)
         max_force_range = calculate_range(valid_max_force)
@@ -935,32 +954,37 @@ class MetaDatabase(Database):
         fig, axs = plt.subplots(3, 2, figsize=(18, 12)) 
     
         # Density Distribution
-        axs[0, 0].hist(valid_densities, bins=50, alpha=0.7, color='blue')
-        axs[0, 0].set_title("Density Distribution ±3 standard deviations")
+        axs[0, 0].hist(valid_densities, bins=self.bins, alpha=self.alpha, color='blue')
+        axs[0, 0].set_title("Density Distribution")
         axs[0, 0].set_xlabel("Density")
         axs[0, 0].set_ylabel("Frequency")
-        axs[0, 0].set_xlim(density_range)
-    
+        if density_range[0] is not None:
+            axs[0, 0].set_xlim(density_range)
+
         # Force Magnitude Distribution
-        axs[0, 1].hist(valid_max_force, bins=50, alpha=0.7, color='orange')
-        axs[0, 1].set_title("Maximum Force Magnitude Distribution ±3 standard deviations")
+        axs[0, 1].hist(valid_max_force, bins=self.bins, alpha=self.alpha, color='orange')
+        axs[0, 1].set_title("Maximum Force Magnitude Distribution")
         axs[0, 1].set_xlabel("Force Magnitude")
         axs[0, 1].set_ylabel("Frequency")
-        axs[0, 1].set_xlim(max_force_range)
-    
+        if max_force_range[0] is not None:
+            axs[0, 1].set_xlim(max_force_range)
+
         # Min Distance Distribution
-        axs[1, 0].hist(valid_min_distance, bins=50, alpha=0.7, color='green')
-        axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution ±3 standard deviations")
-        axs[1, 0].set_xlabel("Min Pairwise Atomic Distance")
+        axs[1, 0].hist(valid_min_distance, bins=self.bins, alpha=self.alpha, color='green')
+        axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution")
+        axs[1, 0].set_xlabel("Min Pairwise Distance")
         axs[1, 0].set_ylabel("Frequency")
-        axs[1, 0].set_xlim(min_distance_range)
-    
+        if min_distance_range[0] is not None:
+            axs[1, 0].set_xlim(min_distance_range)
+
         # Max Distance Distribution
-        axs[1, 1].hist(valid_max_distance, bins=50, alpha=0.7, color='purple')
-        axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution ±3 standard deviations")
-        axs[1, 1].set_xlabel("Max Atomic Distance")
+        axs[1, 1].hist(valid_max_distance, bins=self.bins, alpha=self.alpha, color='purple')
+        axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution")
+        axs[1, 1].set_xlabel("Max Pairwise Distance")
         axs[1, 1].set_ylabel("Frequency")
-        axs[1, 1].set_xlim(max_distance_range)
+        if max_distance_range[0] is not None:
+            axs[1, 1].set_xlim(max_distance_range)
+
     
         # Atom Counts by Symbol
         atom_counts_by_symbol = self.get_atom_counts_by_symbol()  
