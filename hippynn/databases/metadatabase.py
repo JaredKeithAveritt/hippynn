@@ -902,9 +902,6 @@ class MetaDatabase(Database):
         valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
         valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-
-        # Debugging output
-        print(f"valid_max_distance: {valid_max_distance}")
         
         # Calculate ±3 standard deviations for the range
         def calculate_range(data):
