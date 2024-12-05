@@ -11,7 +11,7 @@ Organized datasets for training and prediction.
 """
 from .database import Database
 from .ondisk import DirectoryDatabase, NPZDatabase
-from .metadatabase import MetaDatabase
+# from .metadatabase import MetaDatabase
 has_ase = False
 try: 
     import ase
@@ -21,8 +21,9 @@ except ImportError:
 
 if has_ase:
    from ..interfaces.ase_interface import AseDatabase
+   from .metadatabase import MetaDatabase
 
 all_list = ["Database", "DirectoryDatabase", "NPZDatabase"]
 if has_ase:
-    all_list += ["AseDatabase"]
+    all_list += ["AseDatabase", "MetaDatabase"]
 __all__ = all_list
