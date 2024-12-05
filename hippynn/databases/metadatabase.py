@@ -386,11 +386,10 @@ class MetaDatabase(Database):
     #
     #  Data calculation Functions
     #
-    
-    def calculate_volume(self, coordinates):
+     def calculate_volume(self, coordinates, cell=None):
         """
         Compute the bounding box volume for a set of coordinates.
-        Optionally, compare or use the simulation box volume from the cell matrix.
+        Optionally, use the simulation box volume from the cell matrix.
     
         Args:
             coordinates (np.ndarray): Cartesian positions of atoms in a single database entry.
@@ -413,20 +412,15 @@ class MetaDatabase(Database):
             return results  # Return early if coordinates are empty
     
         # Calculate the simulation box volume if cell is provided
-        if self.cell_key is not None:
-            # Volume of a parallelepiped is |det(cell_matrix)|
-
-            try:
-                cell_volume = np.abs(np.linalg.det(cell))
-                results["cell_volume"] = cell_volume
-    
-            except Exception as e:
-                print(f"change cell_key={self.cell_key}, to  cell_key=NONE")
-
+        if cell is not None:
+            if cell.shape != (3, 3):
+                raise ValueError("Cell must be a 3x3 matrix.")
+            cell_volume = np.abs(np.linalg.det(cell))
+            results["cell_volume"] = cell_volume
     
         return results
-
-
+    
+    
 
 
     
@@ -573,38 +567,51 @@ class MetaDatabase(Database):
 
         self.min_force = min_forces
     
-    def calculate_densities(self): 
+    def calculate_densities(self):
         """
         Calculates the density for each entry in the dataset.
-      
+    
         Notes:
             - Species lists may contain padding represented by zeros, which are excluded
-                from calculations.
+              from calculations.
             - If the mass is zero, volume is invalid, or volume is zero, the density is set
-                to `None` (or could be set to `np.nan` to indicate an invalid density).
+              to `None` (or could be set to `np.nan` to indicate an invalid density).
         """
-      
         densities = []
         # Precompute masses for species
         species_array = self.arr_dict[self.species_key]
         unique_species = np.unique(species_array.flatten())
         species_masses = {species: self.get_mass_from_species(species) for species in unique_species}
-
-        for species_list, coordinates in zip(species_array, self.arr_dict[self.coordinates_key]):
+    
+        # Iterate over each database entry
+        for species_list, coordinates, cell in zip(
+            self.arr_dict[self.species_key],
+            self.arr_dict[self.coordinates_key],
+            self.arr_dict.get(self.cell_key, [None] * len(self.arr_dict[self.coordinates_key]))
+        ):
             # Remove zeros (padding)
             species_list = species_list[species_list != 0]
             # Compute total mass of entry
             mass = sum(species_masses.get(species, 0.0) for species in species_list)
-            volume = self.calculate_volume(coordinates) 
-
+    
+            # Compute volumes
+            volume_results = self.calculate_volume(coordinates, cell=cell)
+            bounding_box_volume = volume_results["bounding_box_volume"]
+            cell_volume = volume_results["cell_volume"]
+    
+            # Prioritize cell volume if available, otherwise use bounding box volume
+            volume = cell_volume if cell_volume is not None else bounding_box_volume
+    
+            # Compute density
             if mass > 0 and volume is not None and volume > 0:
                 density = mass / volume
             else:
-                density = None  
-
+                density = None
+    
             densities.append(density)
-
+    
         self.densities = densities
+
 
     #
     #   Helper Functions for Search Functions
