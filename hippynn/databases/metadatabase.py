@@ -559,7 +559,7 @@ def calculate_volume(self, cell=None):
         Notes:
             - Species lists may contain padding represented by zeros, which are excluded
               from calculations.
-            - Density is reported as `0.0` if there is no volume.
+            - Density is reported as `None` if there is no volume.
         """
         densities = []
     
@@ -586,7 +586,7 @@ def calculate_volume(self, cell=None):
             if mass > 0 and volume is not None and volume > 0:
                 density = mass / volume
             else:
-                density = 0.0  # Set density to 0.0 if volume is not valid
+                density = None  # Set density to 0.0 if volume is not valid
     
             densities.append(density)
     
