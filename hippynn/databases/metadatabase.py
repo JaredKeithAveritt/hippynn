@@ -421,8 +421,7 @@ class MetaDatabase(Database):
                 results["cell_volume"] = cell_volume
     
             except Exception as e:
-                if not quiet:
-                    print(f"change cell_key={self.cell_key}, to  cell_key=NONE")
+                print(f"change cell_key={self.cell_key}, to  cell_key=NONE")
 
     
         return results
