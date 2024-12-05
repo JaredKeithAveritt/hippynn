@@ -387,7 +387,7 @@ class MetaDatabase(Database):
     #  Data calculation Functions
     #
 
-    def calculate_volume(self,coordinates):
+    def TRASH_calculate_volume(self,coordinates):
         """
         For a given database entry, Compute the bounding box volume for given set of coordinates, NOT equal to the simulation box volume
         
@@ -401,7 +401,50 @@ class MetaDatabase(Database):
             x_max, y_max, z_max = coordinates.max(axis=0)
             return (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
         return None # empty database entry
+    
+    
+    def calculate_volume(self, coordinates, cell=None):
+        """
+        Compute the bounding box volume for a set of coordinates.
+        Optionally, compare or use the simulation box volume from the cell matrix.
+    
+        Args:
+            coordinates (np.ndarray): Cartesian positions of atoms in a single database entry.
+            cell (np.ndarray or None): The cell matrix defining the simulation box (3x3).
+    
+        Returns:
+            dict: A dictionary containing:
+                - "bounding_box_volume": Volume of the bounding box enclosing the coordinates.
+                - "cell_volume": Volume of the simulation box (if cell is provided).
+                - "volume_ratio": Ratio of bounding box volume to cell volume (if cell is provided).
+        """
+        results = {"bounding_box_volume": None, "cell_volume": None, "volume_ratio": None}
+    
+        # Calculate the bounding box volume
+        if len(coordinates) > 0:
+            x_min, y_min, z_min = coordinates.min(axis=0)
+            x_max, y_max, z_max = coordinates.max(axis=0)
+            bounding_box_volume = (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
+            results["bounding_box_volume"] = bounding_box_volume
+        else:
+            return results  # Return early if coordinates are empty
+    
+        # Calculate the simulation box volume if cell is provided
+        if cell is not None:
+            # Volume of a parallelepiped is |det(cell_matrix)|
+            cell_volume = np.abs(np.linalg.det(cell))
+            results["cell_volume"] = cell_volume
+    
+            # Calculate the volume ratio
+            if cell_volume > 0:
+                results["volume_ratio"] = bounding_box_volume / cell_volume
+    
+        return results
 
+
+
+
+    
     #
     #  Pair Finder Function
     #
