@@ -386,22 +386,6 @@ class MetaDatabase(Database):
     #
     #  Data calculation Functions
     #
-
-    def TRASH_calculate_volume(self,coordinates):
-        """
-        For a given database entry, Compute the bounding box volume for given set of coordinates, NOT equal to the simulation box volume
-        
-        Args: coordinates: the cartesian positions of each atom in a single database entry
-        
-        Returns:
-            A float representing the volume of the bounding box
-        """
-        if len(coordinates) > 0:
-            x_min, y_min, z_min = coordinates.min(axis=0)
-            x_max, y_max, z_max = coordinates.max(axis=0)
-            return (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
-        return None # empty database entry
-    
     
     def calculate_volume(self, coordinates, cell=None):
         """
