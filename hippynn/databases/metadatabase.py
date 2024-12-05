@@ -387,7 +387,7 @@ class MetaDatabase(Database):
     #  Data calculation Functions
     #
     
-    def calculate_volume(self, coordinates, cell=None):
+    def calculate_volume(self, coordinates):
         """
         Compute the bounding box volume for a set of coordinates.
         Optionally, compare or use the simulation box volume from the cell matrix.
@@ -414,7 +414,7 @@ class MetaDatabase(Database):
             return results  # Return early if coordinates are empty
     
         # Calculate the simulation box volume if cell is provided
-        if cell is not None:
+        if self.cell_key is not None:
             # Volume of a parallelepiped is |det(cell_matrix)|
             cell_volume = np.abs(np.linalg.det(cell))
             results["cell_volume"] = cell_volume
