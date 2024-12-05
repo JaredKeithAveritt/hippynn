@@ -18,7 +18,6 @@ from collections import defaultdict, Counter
 from itertools import islice 
 import re
 import matplotlib.pyplot as plt  
-from scipy.spatial.distance import cdist
 
 class MetaDatabase(Database):
     """
@@ -387,22 +386,39 @@ class MetaDatabase(Database):
     #
     #  Data calculation Functions
     #
-def calculate_volume(self, cell=None):
-    """
-    Compute the simulation box volume from the cell matrix.
-
-    Args:
-        cell (np.ndarray or None): The cell matrix defining the simulation box (3x3).
-
-    Returns:
-        float or None: Volume of the simulation box (if cell is valid), otherwise None.
-    """
-    if cell is not None:
-        if cell.shape != (3, 3):
-            raise ValueError("Cell must be a 3x3 matrix.")
-        return np.abs(np.linalg.det(cell))  # Volume of the parallelepiped
-    return None
-
+    def calculate_volume(self, coordinates, cell=None):
+        """
+        Compute the bounding box volume for a set of coordinates.
+        Optionally, use the simulation box volume from the cell matrix.
+    
+        Args:
+            coordinates (np.ndarray): Cartesian positions of atoms in a single database entry.
+            cell (np.ndarray or None): The cell matrix defining the simulation box (3x3).
+    
+        Returns:
+            dict: A dictionary containing:
+                - "bounding_box_volume": Volume of the bounding box enclosing the coordinates.
+                - "cell_volume": Volume of the simulation box (if cell is provided).
+        """
+        results = {"bounding_box_volume": None, "cell_volume": None}
+    
+        # Calculate the bounding box volume
+        if len(coordinates) > 0:
+            x_min, y_min, z_min = coordinates.min(axis=0)
+            x_max, y_max, z_max = coordinates.max(axis=0)
+            bounding_box_volume = (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
+            results["bounding_box_volume"] = bounding_box_volume
+        else:
+            return results  # Return early if coordinates are empty
+    
+        # Calculate the simulation box volume if cell is provided
+        if cell is not None:
+            if cell.shape != (3, 3):
+                raise ValueError("Cell must be a 3x3 matrix.")
+            cell_volume = np.abs(np.linalg.det(cell))
+            results["cell_volume"] = cell_volume
+    
+        return results
     
     
 
@@ -550,7 +566,6 @@ def calculate_volume(self, cell=None):
         min_forces = np.min(force_magnitudes, axis=1)  
 
         self.min_force = min_forces
-
     
     def calculate_densities(self):
         """
@@ -559,34 +574,39 @@ def calculate_volume(self, cell=None):
         Notes:
             - Species lists may contain padding represented by zeros, which are excluded
               from calculations.
-            - Density is reported as `None` if there is no volume.
+            - If the mass is zero, volume is invalid, or volume is zero, the density is set
+              to `None` (or could be set to `np.nan` to indicate an invalid density).
         """
         densities = []
-    
         # Precompute masses for species
         species_array = self.arr_dict[self.species_key]
         unique_species = np.unique(species_array.flatten())
         species_masses = {species: self.get_mass_from_species(species) for species in unique_species}
     
         # Iterate over each database entry
-        for species_list, cell in zip(
+        for species_list, coordinates, cell in zip(
             self.arr_dict[self.species_key],
+            self.arr_dict[self.coordinates_key],
             self.arr_dict.get(self.cell_key, [None] * len(self.arr_dict[self.coordinates_key]))
         ):
             # Remove zeros (padding)
             species_list = species_list[species_list != 0]
-    
             # Compute total mass of entry
             mass = sum(species_masses.get(species, 0.0) for species in species_list)
     
-            # Compute volume from the cell
-            volume = self.calculate_volume(cell)
+            # Compute volumes
+            volume_results = self.calculate_volume(coordinates, cell=cell)
+            bounding_box_volume = volume_results["bounding_box_volume"]
+            cell_volume = volume_results["cell_volume"]
+    
+            # Prioritize cell volume if available, otherwise use bounding box volume
+            volume = cell_volume if cell_volume is not None else bounding_box_volume
     
             # Compute density
             if mass > 0 and volume is not None and volume > 0:
                 density = mass / volume
             else:
-                density = None  # Set density to 0.0 if volume is not valid
+                density = None
     
             densities.append(density)
     
@@ -1109,4 +1129,3 @@ def calculate_volume(self, cell=None):
         plt.tight_layout()
         plt.savefig("database_distribution.png") 
         plt.show()
-
