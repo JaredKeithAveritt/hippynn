@@ -77,6 +77,8 @@ class MetaDatabase(Database):
     >>> coordinates_key='coordinates',
     >>> energies_key='energy',
     >>> forces_key='forces',
+    >>> cell_key="cell",
+    >>> pair_dist_hard_max = 4.0,
     >>> metadata={ 
     >>>    "Energy_unit" : 'eV',
     >>>    "Mass_unit" : 'grams/mol', 
@@ -84,12 +86,7 @@ class MetaDatabase(Database):
     >>>    "Electronic_Structure_Package" : 'VASP',
     >>>    "Electronic_Structure_Package_Version" : '6.4.3',
     >>>    "Computer_System" : 'LANL',
-    >>>    "Input_Procedure" : { 
-    >>>        "ENCUT": '',
-    >>>        "ALGO": '',
-    >>>        "SIGMA": '',
-    >>>        "KPAR": ''
-    >>>     }
+    >>>    "Input_Procedure" : ''
     >>> },
     >>> populate_metadata=True,
     >>> write_metadata_to_json=True,
@@ -104,8 +101,14 @@ class MetaDatabase(Database):
     >>> # Search for entries with density between 1.0 and 5.0
     >>> results = meta_db.search({'density': {'min': 1.0, 'max': 5.0}})
     
-    >>> # Plot the Force Magnitude Distribution , Density Distribution and Pairwise Distance Distribution
-    >>> meta_db.plot_distributions()
+    >>> # Plot the Force Magnitude Distribution, Density Distribution and Pairwise Distance Distribution
+    >>> meta_db.plot_distributions(
+    >>> density_range=(0.1, 1.5), 
+    >>>     max_force_range=(0, 1),   
+    >>>     min_distance_range=(0, 5), 
+    >>>     bins=100,                  
+    >>>     alpha=0.5       
+    >>>     )
     
     >>> # Update metadata with a single "Comments" key
     >>> meta_db.update_metadata({"Comments": '' })
@@ -127,16 +130,8 @@ class MetaDatabase(Database):
 
     >>> # Search for indicies out of all database entries with a calculated maximum pairwise atomic distance in the range of [0,0.9]
     >>> meta_db.search_entries_by_distance_range([0.0,0.9])
-
-    >>> # Override plot settings
-    >>> meta_db.plot_distributions(
-    >>> density_range=(3, 4.5),  
-    >>> max_force_range=(0, 5),   
-    >>> min_distance_range=(0, 1), 
-    >>> max_distance_range=(0, 10),
-    >>> bins=30,                   
-    >>> alpha=0.5                  
-    >>> )
+    
+    >>> # Plot Distributions
 
 
     **Key Functionalities:**
@@ -167,16 +162,17 @@ class MetaDatabase(Database):
         coordinates_key='coordinates',
         energies_key='energies',
         forces_key='forces',
+        cell_key=None,
         metadata: dict[str, object] = None,
         entry_metadata: dict[int, dict[str, object]] = None,  
         populate_metadata=True,
+        pair_dist_hard_max=5,
         write_metadata_to_json=True,
         json_filename='metadata.json',
         distribution_plots=False,  
         density_range=None,
         max_force_range=None,
         min_distance_range=None,
-        max_distance_range=None,
         bins=50,
         alpha=0.7,
         **kwargs
@@ -194,6 +190,8 @@ class MetaDatabase(Database):
         self.coordinates_key = coordinates_key
         self.energies_key = energies_key
         self.forces_key = forces_key
+        self.cell_key = cell_key
+        self.pair_dist_hard_max = pair_dist_hard_max
         self.write_metadata_to_json = write_metadata_to_json
         self.json_filename = json_filename
         self.distribution_plots = distribution_plots 
@@ -205,7 +203,6 @@ class MetaDatabase(Database):
         self.densities = None
         self.max_force = None
         self.min_force = None
-        self.max_distance = None
         self.min_distance = None
 
         # Distribution plot settings
@@ -213,7 +210,6 @@ class MetaDatabase(Database):
         self.density_range = density_range
         self.max_force_range = max_force_range
         self.min_distance_range = min_distance_range
-        self.max_distance_range = max_distance_range
         self.bins = bins
         self.alpha = alpha
         
@@ -406,81 +402,111 @@ class MetaDatabase(Database):
             return (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
         return None # empty database entry
 
+    #
+    #  Pair Finder Function
+    #
 
 
-
-    def calculate_max_distance(self):
+    def find_pairs(self, coordinates, species, cell=None, periodic=True):
         """
-        Compute the maximum pairwise atomic distance in each structure (i.e., entry in the database).
-    
+        Finds pairs of atoms within a specified hard_cutoff_distance.
+
+        Args:
+            coordinates (np.ndarray): Atom coordinates of shape (N, 3).
+            species (np.ndarray): Atomic species (atomic numbers) of shape (N,).
+            cell (np.ndarray or None): Cell matrix for periodic boundary conditions (3, 3).
+                                       Required if `periodic=True`.
+            periodic (bool): If True, consider periodic boundary conditions.
+
         Returns:
-            max_distances: A list containing the maximum pairwise atomic distance for each entry.
+            dict: A dictionary containing:
+                - "pair_dist": Distances of all valid pairs.
+                - "pair_first": Indices of the first atom in each pair.
+                - "pair_second": Indices of the second atom in each pair.
+                - "pair_coord": Relative coordinates of each pair.
+                - (For periodic systems) "cell_offsets": Cell offset vectors.
         """
-        max_distances = []
-    
+        from scipy.spatial.distance import cdist
+
+        if len(coordinates) < 2:
+            return {
+                "pair_dist": np.array([]),
+                "pair_first": np.array([]),
+                "pair_second": np.array([]),
+                "pair_coord": np.array([]),
+                "cell_offsets": np.array([]) if periodic else None,
+            }
+
+        # Compute pairwise distances
+        if periodic and cell is not None:
+            # Apply periodic boundary conditions
+            fractional_coords = np.dot(coordinates, np.linalg.inv(cell))
+            fractional_coords = fractional_coords % 1.0
+            cartesian_coords = np.dot(fractional_coords, cell)
+            distances = cdist(cartesian_coords, cartesian_coords)
+        else:
+            distances = cdist(coordinates, coordinates)
+
+        # Mask self-distances and filter pairs
+        np.fill_diagonal(distances, np.inf)
+        pair_indices = np.argwhere(distances < self.pair_dist_hard_max)
+        pair_distances = distances[distances < self.pair_dist_hard_max]
+
+        # Extract pairwise information
+        pair_first = pair_indices[:, 0]
+        pair_second = pair_indices[:, 1]
+        pair_coord = coordinates[pair_second] - coordinates[pair_first]
+
+        results = {
+            "pair_dist": pair_distances,
+            "pair_first": pair_first,
+            "pair_second": pair_second,
+            "pair_coord": pair_coord,
+        }
+
+        if periodic and cell is not None:
+            # Compute cell offsets for periodic systems
+            fractional_offsets = fractional_coords[pair_second] - fractional_coords[pair_first]
+            fractional_offsets = fractional_offsets - np.round(fractional_offsets)
+            cell_offsets = np.dot(fractional_offsets, cell)
+            results["cell_offsets"] = cell_offsets
+
+        return results
+
+        
+        
+    def calculate_min_distance(self, periodic=True):
+        min_distances = []
+
         for i, structure_coords in enumerate(self.arr_dict[self.coordinates_key]):
             # Filter out invalid atoms (species == 0)
             valid_indices = np.where(self.arr_dict[self.species_key][i] != 0)[0]
             valid_coords = structure_coords[valid_indices]
-    
-            # Skip entries with fewer than two valid atoms
-            num_atoms = valid_coords.shape[0]
-            if num_atoms < 2:
-                max_distances.append(None)  # Use None to explicitly mark invalid entries
+            valid_species = self.arr_dict[self.species_key][i][valid_indices]
+            structure_cell = self.arr_dict.get(self.cell_key, None)
+
+            # Skip if fewer than two atoms are present
+            if len(valid_coords) < 2:
+                min_distances.append(np.inf)
                 continue
-    
-            # Compute pairwise distances
-            diff = valid_coords[:, np.newaxis, :] - valid_coords[np.newaxis, :, :]
-            dist_matrix = np.sqrt(np.sum(diff**2, axis=2))
-    
-            # Ignore self-distances by masking the diagonal
-            np.fill_diagonal(dist_matrix, -np.inf)
-    
-            # Find the maximum distance
-            max_distance = np.max(dist_matrix)
-            if np.isfinite(max_distance):
-                max_distances.append(max_distance)
+
+            # Use find_pairs to calculate pairwise distances
+            pairs_result = self.find_pairs(
+                coordinates=valid_coords,
+                species=valid_species,
+                cell=structure_cell[i] if structure_cell is not None else None,
+                periodic=periodic,
+            )
+
+            # Get the minimum distance from pair_dist
+            if pairs_result["pair_dist"].size > 0:
+                min_distances.append(np.min(pairs_result["pair_dist"]))
             else:
-                max_distances.append(None)  # Use None if no valid max distance is found
-    
-        self.max_distance = max_distances
-        return max_distances
+                min_distances.append(np.inf)  # No pairs found within the cutoff
 
-
-        
-        
-    def calculate_min_distance(self):
-        """
-        For a given database entry, compute the minimum pairwise distance of atoms in each structure.
-
-        Returns:
-            min_distances: A list containing the minimum pairwise atomic distance for each entry in the database.
-        """
-        min_distances = []  
-        
-        for i, structure_coords in enumerate(self.arr_dict[self.coordinates_key]):
-            # Filter out invalid atoms (species == 0)
-            valid_indices = np.where(self.arr_dict[self.species_key][i] != 0)[0]
-            valid_coords = structure_coords[valid_indices]
-            
-            # Compute pairwise distances
-            num_atoms = valid_coords.shape[0]
-            if num_atoms < 2:
-                min_distances.append(np.inf)  # No valid distances in single-atom or empty structures
-                continue
-            
-            # Calculate distance matrix
-            diff = valid_coords[:, np.newaxis, :] - valid_coords[np.newaxis, :, :]
-            dist_matrix = np.sqrt(np.sum(diff**2, axis=2))
-            
-            # Mask diagonal (self-distances)
-            np.fill_diagonal(dist_matrix, np.inf)
-            
-            # Find the minimum distance
-            min_distances.append(np.min(dist_matrix))
-        
         self.min_distance = min_distances
         return min_distances
+
 
     def calculate_atom_counts(self):
         """
@@ -722,10 +748,9 @@ class MetaDatabase(Database):
         Returns:
             List of indices of matching entries.
         """
-        if self.min_distance is None or self.max_distance is None:
+        if self.min_distance is None:
             # Compute distances if they haven't been calculated yet
             self.calculate_min_distance()
-            self.calculate_max_distance()
     
         if not isinstance(distance_range, (list, tuple)) or len(distance_range) != 2:
             raise ValueError("distance_range must be a list or tuple with exactly two elements [min_distance, max_distance].")
@@ -772,24 +797,6 @@ class MetaDatabase(Database):
     
         return result
 
-    def get_density_range(self):
-        """
-        Returns the range of denasities (min and max) across the dataset.
-        """
-        if self.densities is None:
-            self.calculate_densities()
-        
-        valid_densities = [d for d in self.densities if d is not None]
-    
-        if valid_densities:
-            min_density = min(valid_densities)
-            max_density = max(valid_densities)
-            return [min_density, max_density]
-        else:
-            return [None, None]  # No valid densities found
-
-    
-
     def get_atom_counts_by_symbol(self):
         """
         Returns a dictionary smapping element symbols to their counts in the dataset.
@@ -808,76 +815,154 @@ class MetaDatabase(Database):
         return counts_by_symbol
 
 
-    def get_min_distance_range(self):
+    def get_density_statistics(self):
         """
-        Compute and print the range of minimum distances (min and max) across the dataset.
-    
-        Returns:
-            min_distance_range: A tuple containing the minimum and maximum of the minimum distances.
+        Returns statistics (min, max, mean, median, std) for densities across the dataset, including:
+        """
+        if self.densities is None:
+            self.calculate_densities()
+        
+        # Filter valid densities
+        valid_densities = [d for d in self.densities if d is not None]
+        
+        if valid_densities:
+            min_density = min(valid_densities)
+            max_density = max(valid_densities)
+            mean_density = np.mean(valid_densities)
+            median_density = np.median(valid_densities)
+            std_density = np.std(valid_densities)
+            
+            return {
+                "min": min_density,
+                "max": max_density,
+                "mean": mean_density,
+                "median": median_density,
+                "std": std_density
+        }
+        else:
+            return {
+                "min": None, "max": None, "mean": None, "median": None, "std": None}  # No valid densities found
+
+        
+        
+        
+    def get_min_distance_statistics(self):
+        """
+        Returns statistics (min, max, mean, median, std) for minimum atomic distances.
         """
         if self.min_distance is None:
-            raise ValueError("Minimum atomic distances not calculated yet. Run 'calculate_min_distance()' first.")
+            self.calculate_min_distance()
         
-        # Calculate the min and max of the minimum distances
-        min_dist = min(self.min_distance)
-        max_dist = max(self.min_distance)
-    
-        return [min_dist, max_dist]
+        valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
+        
+        if valid_min_distance:
+            return {
+                "min": np.min(valid_min_distance),
+                "max": np.max(valid_min_distance),
+                "mean": np.mean(valid_min_distance),
+                "median": np.median(valid_min_distance),
+                "std": np.std(valid_min_distance),
+            }
+        else:
+            return {"min": None, "max": None, "mean": None, "median": None, "std": None}
 
-    def get_max_force_range(self):
+    def get_max_force_statistics(self):
         """
-        Gets the range of force magnitude (min and max) of the max force across the dataset.
-
-        Returns:
-            (min_of_max_force, max_force): A tuple containing the minimum and maximum of the maximum atomic forces.
+        Returns statistics (min, max, mean, median, std) for maximum force magnitudes.
         """
         if self.max_force is None:
-            raise ValueError("Minimum atomic distances not calculated yet. Run 'calculate_max_force()' first.")
-        if self.min_force is None:
-            raise ValueError("Minimum atomic distances not calculated yet. Run 'calculate_min_force()' first.")
+            self.calculate_max_force()
         
-        min_of_max_force = min(self.max_force) #self.min_force[self.min_force > 0.0].min() if (self.min_force > 0.0).any() else None
-        max_force = max(self.max_force)
-    
-        return [min_of_max_force, max_force]
+        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
+        
+        if valid_max_force:
+            return {
+                "min": np.min(valid_max_force),
+                "max": np.max(valid_max_force),
+                "mean": np.mean(valid_max_force),
+                "median": np.median(valid_max_force),
+                "std": np.std(valid_max_force),
+            }
+        else:
+            return {"min": None, "max": None, "mean": None, "median": None, "std": None}
 
 
     def populate_metadata(self, update=True, quiet=False):
         """
-        Runs the Calculates for various entry-level properties and optionally updates global metadata.
-    
+        Calculates entry-level properties and optionally updates global metadata.
+
         Args:
             update (bool): Whether to update the global metadata with the calculated values.
             quiet (bool): If True, suppresses printing of metadata.
         """
-        # Calculate entry)level properties
-        self.calculate_densities()
-        self.calculate_max_force()
-        self.calculate_min_force()
-        self.calculate_min_distance()
-        self.calculate_atom_counts()
-        self.extract_unique_numbers_large()
-    
-        if update:
-            # Update global metadata with calculated properties
-            self.update_metadata(
-                {
-                    "number_of_entries_for_each_combination_of_atom_types": self.get_element_combinations(),
-                    "range_min_atomic_distance": self.get_min_distance_range(),
-                    "range_max_force_magnitude": self.get_max_force_range(),
-                    "range_density": self.get_density_range(),
-                    "atom_counts_by_symbol": self.get_atom_counts_by_symbol(),
-                }
-            )
-    
-        if not quiet:
-            # Print metadata if not in quiet mode
-            self.print_metadata()
+        # Dictionary to hold metadata updates
+        metadata_updates = {}
 
-        # Save metadata to JSON if enabled
+        # Calculate entry-level properties with error handling
+        try:
+            self.calculate_densities()
+            density_stats = self.get_density_statistics()  # Collect statistics for density
+            metadata_updates["density_statistics"] = density_stats
+        except Exception as e:
+            if not quiet:
+                print(f"Error calculating densities: {e}")
+
+        try:
+            self.calculate_max_force()
+            max_force_stats = self.get_max_force_statistics()  # Collect max force statistics
+            metadata_updates["max_force_magnitude_statistics"] = max_force_stats
+        except Exception as e:
+            if not quiet:
+                print(f"Error calculating max force statistics: {e}")
+
+        try:
+            self.calculate_min_force()
+        except Exception as e:
+            if not quiet:
+                print(f"Error calculating min force: {e}")
+
+        try:
+            self.calculate_min_distance()
+            min_distance_stats = self.get_min_distance_statistics()  # Collect min distance statistics
+            metadata_updates["min_atomic_distance_statistics"] = min_distance_stats
+        except Exception as e:
+            if not quiet:
+                print(f"Error calculating minimum distances: {e}")
+
+        try:
+            self.calculate_atom_counts()
+            metadata_updates["atom_counts_by_symbol"] = self.get_atom_counts_by_symbol()
+        except Exception as e:
+            if not quiet:
+                print(f"Error calculating atom counts: {e}")
+
+        try:
+            self.extract_unique_numbers_large()
+            metadata_updates["number_of_entries_for_each_combination_of_atom_types"] = self.get_element_combinations()
+        except Exception as e:
+            if not quiet:
+                print(f"Error extracting unique atomic combinations: {e}")
+
+        # Update global metadata
+        if update:
+            self.update_metadata(metadata_updates)
+
+        # Print metadata if not in quiet mode
+        if not quiet:
+            print("Metadata:")
+            for key, value in metadata_updates.items():
+                print(f"  {key}: {value}")
+
+        # Save metadata to JSON
         if self.write_metadata_to_json:
-            self.save_metadata_to_json()
-    
+            try:
+                self.save_metadata_to_json()
+            except Exception as e:
+                if not quiet:
+                    print(f"Error saving metadata to JSON: {e}")
+
+
+
     def make_json_serializable(self):
         """
         Converts the metadata into a JSON-compatible format.
@@ -932,13 +1017,10 @@ class MetaDatabase(Database):
         if self.min_distance is None :
             self.calculate_min_distance()
 
-        if self.max_distance is None:
-            self.calculate_max_distance()
             
         # Filter valid values for plotting
         valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
         valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
-        valid_max_distance = [d for d in self.max_distance if np.isfinite(d)]
         valid_max_force = [f for f in self.max_force if np.isfinite(f)]
         
         # Calculate ±3 standard deviations for the range
@@ -955,7 +1037,6 @@ class MetaDatabase(Database):
         density_range = calculate_range(valid_densities, density_range or self.density_range)
         max_force_range = calculate_range(valid_max_force, max_force_range or self.max_force_range)
         min_distance_range = calculate_range(valid_min_distance, min_distance_range or self.min_distance_range)
-        max_distance_range = calculate_range(valid_max_distance, max_distance_range or self.max_distance_range)
     
         # Use defaults if bins and alpha are not provided
         bins = bins or self.bins
@@ -969,9 +1050,8 @@ class MetaDatabase(Database):
         density_range = valid_range(density_range)
         max_force_range = valid_range(max_force_range)
         min_distance_range = valid_range(min_distance_range)
-        max_distance_range = valid_range(max_distance_range)
     
-        fig, axs = plt.subplots(3, 2, figsize=(18, 12)) 
+        fig, axs = plt.subplots(2, 2, figsize=(18, 12))
     
         # Density Distribution
         axs[0, 0].hist(valid_densities, bins=bins, alpha=alpha, color='blue')
@@ -997,29 +1077,19 @@ class MetaDatabase(Database):
         if min_distance_range[0] is not None:
             axs[1, 0].set_xlim(min_distance_range)
 
-        # Max Distance Distribution
-        axs[1, 1].hist(valid_max_distance, bins=bins, alpha=alpha, color='purple')
-        axs[1, 1].set_title("Max Pairwise Atomic Distance Distribution")
-        axs[1, 1].set_xlabel("Max Pairwise Distance")
-        axs[1, 1].set_ylabel("Frequency")
-        if max_distance_range[0] is not None:
-            axs[1, 1].set_xlim(max_distance_range)
-
     
         # Atom Counts by Symbol
         atom_counts_by_symbol = self.get_atom_counts_by_symbol()  
         symbols = list(atom_counts_by_symbol.keys())
         counts = list(atom_counts_by_symbol.values())
     
-        axs[2, 0].bar(symbols, counts, color='skyblue', alpha=alpha)
-        axs[2, 0].set_title("Atom Counts by Symbol")
-        axs[2, 0].set_xlabel("Element Symbol")
-        axs[2, 0].set_ylabel("Atom Count")
+        axs[1, 1].bar(symbols, counts, color='skyblue', alpha=alpha)
+        axs[1, 1].set_title("Atom Counts by Symbol")
+        axs[1, 1].set_xlabel("Element Symbol")
+        axs[1, 1].set_ylabel("Atom Count")
         for i, count in enumerate(counts):
-            axs[2, 0].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
+            axs[1, 1].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
     
-        # Hide the last unused subplot
-        axs[2, 1].axis('off')
     
         plt.tight_layout()
         plt.savefig("database_distribution.png") 
