@@ -400,9 +400,8 @@ class MetaDatabase(Database):
             dict: A dictionary containing:
                 - "bounding_box_volume": Volume of the bounding box enclosing the coordinates.
                 - "cell_volume": Volume of the simulation box (if cell is provided).
-                - "volume_ratio": Ratio of bounding box volume to cell volume (if cell is provided).
         """
-        results = {"bounding_box_volume": None, "cell_volume": None, "volume_ratio": None}
+        results = {"bounding_box_volume": None, "cell_volume": None}
     
         # Calculate the bounding box volume
         if len(coordinates) > 0:
@@ -416,12 +415,15 @@ class MetaDatabase(Database):
         # Calculate the simulation box volume if cell is provided
         if self.cell_key is not None:
             # Volume of a parallelepiped is |det(cell_matrix)|
-            cell_volume = np.abs(np.linalg.det(cell))
-            results["cell_volume"] = cell_volume
+
+            try:
+                cell_volume = np.abs(np.linalg.det(cell))
+                results["cell_volume"] = cell_volume
     
-            # Calculate the volume ratio
-            if cell_volume > 0:
-                results["volume_ratio"] = bounding_box_volume / cell_volume
+            except Exception as e:
+                if not quiet:
+                    print(f"change cell_key={self.cell_key}, to  cell_key=NONE")
+
     
         return results
 
