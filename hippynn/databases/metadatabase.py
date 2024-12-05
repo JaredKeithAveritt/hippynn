@@ -386,7 +386,7 @@ class MetaDatabase(Database):
     #
     #  Data calculation Functions
     #
-     def calculate_volume(self, coordinates, cell=None):
+    def calculate_volume(self, coordinates, cell=None):
         """
         Compute the bounding box volume for a set of coordinates.
         Optionally, use the simulation box volume from the cell matrix.
