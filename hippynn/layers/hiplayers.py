@@ -177,7 +177,7 @@ class InteractLayer(torch.nn.Module):
         return [self.int_weights, self.selfint.weight]
 
     
-    @nvtx.annotate(“forward()”, color="orange") 
+    @nvtx.annotate("forward()", color="orange") 
     def forward(self, in_features, pair_first, pair_second, dist_pairs):
         """
         Pytorch Enforced Forward function
@@ -273,7 +273,7 @@ class InteractLayerVec(InteractLayer):
     def set_extra_state(self, state):
         self.cusp_reg = state["cusp_reg"]
         
-    @nvtx.annotate(“forward()”, color="yellow") 
+    @nvtx.annotate("forward()", color="yellow") 
     def forward(self, in_features, pair_first, pair_second, dist_pairs, coord_pairs):
 
         n_atoms_real = in_features.shape[0]
@@ -314,7 +314,7 @@ class InteractLayerQuad(InteractLayerVec):
         upper_ind = torch.as_tensor([0, 1, 2, 4, 5], dtype=torch.int64)
         self.register_buffer("upper_ind", upper_ind, persistent=False)  # Static, not part of module state
 
-    @nvtx.annotate(“forward()”, color="green") 
+    @nvtx.annotate("forward()", color="green") 
     def forward(self, in_features, pair_first, pair_second, dist_pairs, coord_pairs):
 
         n_atoms_real = in_features.shape[0]
