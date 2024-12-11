@@ -56,7 +56,8 @@ class MLIAPInterface(MLIAPUnified):
 
     def empty_tensor(self,dimentions):
         return torch.empty(dimentions,device=self.model_device)
-
+        
+    @nvtx.annotate(“compute_forces()”, color="purple")
     def compute_forces(self, data):
         """
         :param data: MLIAPData object (provided internally by lammps)
