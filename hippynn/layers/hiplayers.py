@@ -1,6 +1,8 @@
 """
 Layers for HIP-NN
 """
+import nvtx
+
 import numpy as np
 import torch
 import warnings
