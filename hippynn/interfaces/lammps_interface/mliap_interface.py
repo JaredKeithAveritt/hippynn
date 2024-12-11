@@ -1,6 +1,7 @@
 """
 Interface for creating LAMMPS MLIAP Unified models.
 """
+import nvtx
 import pickle
 import warnings
 
