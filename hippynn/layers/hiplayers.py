@@ -33,7 +33,6 @@ class CosCutoff(torch.nn.Module):
         super().__init__()
         self.hard_max_dist = hard_max_dist
         
-    @nvtx.annotate("CosCutoff.forward()", color="red") 
     def forward(self, dist_tensor):
         cutoff_sense = torch.cos(np.pi / 2 * dist_tensor / self.hard_max_dist) ** 2
         cutoff_sense = cutoff_sense * (dist_tensor <= self.hard_max_dist).to(cutoff_sense.dtype)
@@ -58,7 +57,6 @@ class GaussianSensitivityModule(SensitivityModule):
         init_sigma = min_dist_soft * 2 * n_dist  # pulled from theano code
         self.sigma.data.fill_(init_sigma)
         
-    @nvtx.annotate("GaussianSensitivityModule.forward()", color="orange")
     def forward(self, distflat, warn_low_distances=None):
         if warn_low_distances is None:
             warn_low_distances = settings.WARN_LOW_DISTANCES
@@ -90,7 +88,6 @@ class InverseSensitivityModule(SensitivityModule):
         init_sigma = min_dist_soft * 2 * n_dist
         self.sigma.data.fill_(init_sigma)
         
-    @nvtx.annotate("InverseSensitivityModule.forward()", color="yellow")
     def forward(self, distflat, warn_low_distances=None):
         if warn_low_distances is None:
             warn_low_distances = settings.WARN_LOW_DISTANCES
@@ -133,7 +130,6 @@ class SensitivityBottleneck(torch.nn.Module):
 
         torch.nn.init.orthogonal_(self.matching.data)
         
-    @nvtx.annotate("SensitivityBottleneck.forward()", color="green")
     def forward(self, distflat):
         base_sense = self.base_sense(distflat)
         reduced_sense = torch.mm(base_sense, self.matching)
@@ -181,7 +177,7 @@ class InteractLayer(torch.nn.Module):
     def regularization_params(self):
         return [self.int_weights, self.selfint.weight]
         
-    @nvtx.annotate("InteractLayer.forward()", color="blue")
+    @nvtx.annotate("forward()", color="blue")
     def forward(self, in_features, pair_first, pair_second, dist_pairs):
         """
         Pytorch Enforced Forward function
@@ -280,7 +276,7 @@ class InteractLayerVec(InteractLayer):
     def set_extra_state(self, state):
         self.cusp_reg = state["cusp_reg"]
         
-    @nvtx.annotate("InteractLayerVec.forward()", color="purple")
+    @nvtx.annotate("forward()", color="purple")
     def forward(self, in_features, pair_first, pair_second, dist_pairs, coord_pairs):
 
         n_atoms_real = in_features.shape[0]
@@ -331,7 +327,7 @@ class InteractLayerQuad(InteractLayerVec):
         upper_ind = torch.as_tensor([0, 1, 2, 4, 5], dtype=torch.int64)
         self.register_buffer("upper_ind", upper_ind, persistent=False)  # Static, not part of module state
         
-    @nvtx.annotate("InteractLayerQuad.forward()", color="purple")
+    @nvtx.annotate("forward()", color="purple")
     def forward(self, in_features, pair_first, pair_second, dist_pairs, coord_pairs):
 
         n_atoms_real = in_features.shape[0]
