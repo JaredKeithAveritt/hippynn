@@ -33,6 +33,8 @@ New Features:
 - Added new function to reload library settings.
 - Added atomization-consistent node which exactly constrains their predictions in a dissociated limit.
 - Added node to split by species. Can be used to calculate or plot loss by species.
+- New ASELangevinDynamics updater for MD module. Implements the algorithm used by ASE. Different from 
+  older LangevinDynamics updater. Expected to be more numerically stable. 
 
 
 Improvements:
