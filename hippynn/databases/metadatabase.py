@@ -14,10 +14,13 @@ from ase.data import atomic_masses, chemical_symbols
 from ase.units import _amu
 import json
 import numpy as np
+import torch
 from collections import defaultdict, Counter
 from itertools import islice 
 import re
 import matplotlib.pyplot as plt  
+from hippynn.pretraining import compute_hipnn_e0
+from hippynn.layers.indexers import OneHotSpecies
 
 class MetaDatabase(Database):
     """
@@ -173,8 +176,10 @@ class MetaDatabase(Database):
         density_range=None,
         max_force_range=None,
         min_distance_range=None,
+        energies_range=None,
         bins=50,
         alpha=0.7,
+        peratom=False,
         **kwargs
     ):
         self.metadata = metadata.copy() if metadata else {}
@@ -210,8 +215,11 @@ class MetaDatabase(Database):
         self.density_range = density_range
         self.max_force_range = max_force_range
         self.min_distance_range = min_distance_range
+        self.energies_range = energies_range
         self.bins = bins
         self.alpha = alpha
+        self.peratom = peratom
+        self.E0_regression = None
         
         if populate_metadata:
             self.populate_metadata(update=True, quiet=False)
@@ -526,8 +534,8 @@ class MetaDatabase(Database):
             else:
                 min_distances.append(np.inf)  # No pairs found within the cutoff
 
-        self.min_distance = min_distances
-        return min_distances
+        self.min_distance = np.array(min_distances)
+        return self.min_distance
 
 
     def calculate_atom_counts(self):
@@ -554,7 +562,22 @@ class MetaDatabase(Database):
         force_magnitudes = np.linalg.norm(forces, axis=2) 
         max_forces = np.max(force_magnitudes, axis=1) 
       
-        self.max_force = max_forces
+        self.max_force = np.array(max_forces)
+
+    def calculate_E0_regression(self):
+        """
+        Calculates the energy regression for the dataset.
+        """
+        if self.atomic_numbers_in_dataset is None:
+            unique_numbers = self.extract_unique_numbers_large()
+        else:
+            unique_numbers = self.atomic_numbers_in_dataset.copy()
+        if 0 not in unique_numbers:
+            unique_numbers = [0] + unique_numbers
+        encoder = OneHotSpecies(unique_numbers)
+        e_per_species = compute_hipnn_e0(encoder,torch.tensor(self.arr_dict[self.species_key]),torch.tensor(self.arr_dict[self.energies_key]),peratom=self.peratom)
+        self.E0_regression = e_per_species.to('cpu').numpy()
+        return self.E0_regression
 
 
     def calculate_min_force(self):
@@ -565,7 +588,7 @@ class MetaDatabase(Database):
         force_magnitudes = np.linalg.norm(forces, axis=2)  
         min_forces = np.min(force_magnitudes, axis=1)  
 
-        self.min_force = min_forces
+        self.min_force = np.array(min_forces)
     
     def calculate_densities(self):
         """
@@ -610,7 +633,7 @@ class MetaDatabase(Database):
     
             densities.append(density)
     
-        self.densities = densities
+        self.densities = np.array(densities)
 
 
     #
@@ -849,6 +872,17 @@ class MetaDatabase(Database):
         
         return counts_by_symbol
 
+    def calculate_range(self, data, manual_range):
+        if manual_range:
+            return manual_range
+        if len(data) > 0:
+            #mean = np.mean(data)
+            #std = np.std(data)
+            #Use IRQ instead
+            dataQ1,dataQ3 = np.percentile(data,[25,75])
+            dataIRQ = dataQ3-dataQ1
+            return dataQ1-2.5*dataIRQ, dataQ3+2.5*dataIRQ
+        return None, None
 
     def get_density_statistics(self):
         """
@@ -858,25 +892,30 @@ class MetaDatabase(Database):
             self.calculate_densities()
         
         # Filter valid densities
-        valid_densities = [d for d in self.densities if d is not None]
+        #valid_densities = [d for d in self.densities if d is not None]
+        valid_densities = self.densities[np.isfinite(self.densities)]
+        densityL,densityH = self.calculate_range(valid_densities,self.density_range)
+        valid_densities = valid_densities[(valid_densities >= densityL) & (valid_densities <= densityH)]
         
-        if valid_densities:
+        if valid_densities.any():
             min_density = min(valid_densities)
             max_density = max(valid_densities)
             mean_density = np.mean(valid_densities)
             median_density = np.median(valid_densities)
             std_density = np.std(valid_densities)
+            outliers_density = len(self.densities) - len(valid_densities)
             
             return {
                 "min": min_density,
                 "max": max_density,
                 "mean": mean_density,
                 "median": median_density,
-                "std": std_density
+                "std": std_density,
+                "outliers": outliers_density,
         }
         else:
             return {
-                "min": None, "max": None, "mean": None, "median": None, "std": None}  # No valid densities found
+                    "min": None, "max": None, "mean": None, "median": None, "std": None, "outliers": None}  # No valid densities found
 
         
         
@@ -908,19 +947,50 @@ class MetaDatabase(Database):
         if self.max_force is None:
             self.calculate_max_force()
         
-        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
+#        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
+        valid_max_force = self.max_force[np.isfinite(self.max_force)]
+        max_forceL,max_forceH = self.calculate_range(valid_max_force, self.max_force_range)
+        valid_max_force = valid_max_force[(valid_max_force >= max_forceL) & (valid_max_force <= max_forceH)]
         
-        if valid_max_force:
+        if valid_max_force.any():
             return {
                 "min": np.min(valid_max_force),
                 "max": np.max(valid_max_force),
                 "mean": np.mean(valid_max_force),
                 "median": np.median(valid_max_force),
                 "std": np.std(valid_max_force),
+                "outliers": len(self.max_force)-len(valid_max_force),
             }
         else:
-            return {"min": None, "max": None, "mean": None, "median": None, "std": None}
+            return {"min": None, "max": None, "mean": None, "median": None, "std": None, "outliers":None}
 
+    def get_energy_statistics(self):
+        """
+        Returns statistics (min, max, mean, median, std, outliers) for linearly regressed energy values
+        """
+        if self.E0_regression is None: 
+            self.calculate_energy_regression()
+        unique_numbers = self.atomic_numbers_in_dataset.copy()
+        if 0 not in unique_numbers:
+            unique_numbers = [0] + unique_numbers
+        encoder = OneHotSpecies(unique_numbers)
+        encoded_species = encoder(torch.tensor(self.arr_dict[self.species_key]))[0].to(torch.float64)
+        linear_energies = torch.tensordot(encoded_species,torch.tensor(self.E0_regression,dtype=torch.float64),dims=([2],[0])).sum(axis=1)
+        defect_energies = torch.tensor(self.arr_dict[self.energies_key],dtype=torch.float64) - linear_energies
+        defect_energies = defect_energies.to('cpu').numpy()
+        energiesL,energiesH = self.calculate_range(defect_energies,self.energies_range)
+        valid_energies = defect_energies[(defect_energies >= energiesL) & (defect_energies <= energiesH)]
+        if valid_energies.any():
+            return {
+            "min": np.min(valid_energies),
+            "max": np.max(valid_energies),
+            "mean": np.mean(valid_energies),
+            "median": np.median(valid_energies),
+            "std": np.std(valid_energies),
+            "outliers": len(self.arr_dict[self.energies_key])-len(valid_energies),
+            }
+        else:
+            return {"min": None, "max": None, "mean": None, "median": None, "std": None, "outliers":None}
 
     def populate_metadata(self, update=True, quiet=False):
         """
@@ -947,6 +1017,14 @@ class MetaDatabase(Database):
             max_force_stats = self.get_max_force_statistics()  # Collect max force statistics
             metadata_updates["max_force_magnitude_statistics"] = max_force_stats
         except Exception as e:
+            if not quiet:
+                print(f"Error calculating max force statistics: {e}")
+
+        if True: #try:
+            self.calculate_E0_regression()
+            energy_stats = self.get_energy_statistics()  # Collect max force statistics
+            metadata_updates["energy_statistics"] = energy_stats
+        else: #except Exception as e:
             if not quiet:
                 print(f"Error calculating max force statistics: {e}")
 
@@ -1054,24 +1132,30 @@ class MetaDatabase(Database):
 
             
         # Filter valid values for plotting
-        valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
-        valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
-        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
+        #valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
+        valid_densities = self.densities[np.isfinite(self.densities)]
+        #valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
+        valid_min_distance = self.min_distance[np.isfinite(self.min_distance)]
+        #valid_max_force = [f for f in self.max_force if np.isfinite(f)]
+        valid_max_force = self.max_force[np.isfinite(self.max_force)]
         
         # Calculate ±3 standard deviations for the range
-        def calculate_range(data, manual_range):
-            if manual_range:
-                return manual_range
-            if len(data) > 0:
-                mean = np.mean(data)
-                std = np.std(data)
-                return mean - 3 * std, mean + 3 * std
-            return None, None
+        #def calculate_range(data, manual_range):
+        #    if manual_range:
+        #        return manual_range
+        #    if len(data) > 0:
+        #        #mean = np.mean(data)
+        #        #std = np.std(data)
+        #        #Use IRQ instead
+        #        dataQ1,dataQ3 = np.percentile(data,[25,75])
+        #        dataIRQ = dataQ3-dataQ1
+        #        return dataQ1-1.5*dataIRQ, dataQ3+1.5*dataIRQ
+        #    return None, None
 
         # Determine ranges
-        density_range = calculate_range(valid_densities, density_range or self.density_range)
-        max_force_range = calculate_range(valid_max_force, max_force_range or self.max_force_range)
-        min_distance_range = calculate_range(valid_min_distance, min_distance_range or self.min_distance_range)
+        density_range = self.calculate_range(valid_densities, self.density_range) #density_range or self.density_range)
+        max_force_range = self.calculate_range(valid_max_force, self.max_force_range) #max_force_range or self.max_force_range)
+        min_distance_range = self.calculate_range(valid_min_distance, self.min_distance_range) #min_distance_range or self.min_distance_range)
     
         # Use defaults if bins and alpha are not provided
         bins = bins or self.bins
