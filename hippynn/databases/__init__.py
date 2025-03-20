@@ -13,17 +13,27 @@ from .database import Database
 from .ondisk import DirectoryDatabase, NPZDatabase
 # from .metadatabase import MetaDatabase
 has_ase = False
+has_h5 = False
+
 try: 
     import ase
     has_ase = True
+    import h5py
+    has_h5 = True
 except ImportError:
     pass
 
 if has_ase:
-   from ..interfaces.ase_interface import AseDatabase
-   from .metadatabase import MetaDatabase
+    from ..interfaces.ase_interface import AseDatabase
+    from .SNAPJson import SNAPDirectoryDatabase
+    from .metadatabase import MetaDatabase
+    if has_h5:
+        from .h5_pyanitools import PyAniFileDB, PyAniDirectoryDB
 
 all_list = ["Database", "DirectoryDatabase", "NPZDatabase"]
+
 if has_ase:
-    all_list += ["AseDatabase", "MetaDatabase"]
+    all_list += ["AseDatabase", "SNAPDirectoryDatabase","MetaDatabase"]
+    if has_h5:
+        all_list += ["PyAniFileDB", "PyAniDirectoryDB"]
 __all__ = all_list

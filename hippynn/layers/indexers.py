@@ -172,10 +172,9 @@ class CellScaleInducer(torch.nn.Module):
     def forward(self, coordinates, cell):
         strain = torch.eye(
             coordinates.shape[2], dtype=coordinates.dtype, device=coordinates.device, requires_grad=True
-        ).unsqueeze(0)
+        ).tile(coordinates.shape[0],1,1)
         strained_coordinates = torch.bmm(coordinates, strain)
-        if cell.dim() == 2:
-            strained_cell = torch.mm(cell, strain.squeeze(0))
+        strained_cell = torch.bmm(cell, strain)
         return strained_coordinates, strained_cell, strain
 
 
@@ -272,3 +271,13 @@ class FuzzyHistogram(torch.nn.Module):
         x = values - self.bins
         histo = torch.exp(-((x / self.sigma) ** 2) / 4)
         return torch.flatten(histo, end_dim=1)
+    
+class SpeciesIndexer(torch.nn.Module):
+    def forward(self, values, onehot_encoding):
+        n_species = onehot_encoding.shape[1]
+        values_by_species = []
+        for i in range(n_species):
+            species_mask = onehot_encoding[:,i]
+            species_values = values[species_mask]
+            values_by_species.append(species_values)
+        return values_by_species

@@ -1,3 +1,70 @@
+
+
+Breaking changes:
+-----------------
+
+- ``set_e0_values`` has been renamed to ``hierarchical_energy_initialization``.
+  The old name is still provided but deprecated, and will be removed.
+- The argument ``restore_db`` has been renamed to ``restart_db``. The affected
+  functions are ``load_checkpoint``, ``load_checkpoint_from_cwd``, and
+  ``restore_checkpoint``.
+- ``database.make_trainvalidtest_split`` now only takes keyword arguments to
+  avoid confusion. Use ``make_trainvalidtest_split(test_size=a, valid_size=b)``
+  instead of ``make_trainvalidtest_split(a, b)``.
+- Invalid custom kernel specifications are now errors rather than warnings.
+- Method of specifying units for custom MD algorithms has changed.
+
+New Features:
+-------------
+
+- Added a new custom cuda kernel implementation using triton.
+  These are highly performant and now the default implementation.
+- Exporting any database to NPZ or H5 format after preprocessing can be done with a method call.
+- Database states can be cached to disk to simplify the restarting of training.
+- Added batch geometry optimizer features in order to optimize geometries
+  in parallel on the GPU. Algorithms include FIRE, Newton-Raphson, and BFGS.
+- Added experiment pytorch lightning trainer to provide for simple parallelized training.
+- Added a molecular dynamics engine which includes the ability to batch over systems.
+- Added examples pertaining to coarse graining.
+- Added pair finders based on scipy KDTree for training to large systems.
+- Added tool to drastically simplify creating ensemble models. The ensemblized graphs
+  are compatible with molecular dynamics codes such ASE and LAMMPS.
+- Added the ability to weight different systems/atoms/bonds in a loss function.
+- Added new function to reload library settings.
+- Added atomization-consistent node which exactly constrains their predictions in a dissociated limit.
+- Added node to split by species. Can be used to calculate or plot loss by species.
+- New ASELangevinDynamics updater for MD module. Implements the algorithm used by ASE. Different from 
+  older LangevinDynamics updater. Expected to be more numerically stable. 
+- Added batch size to MolecularDynamics class. This is passed to the model during each step.
+
+Improvements:
+-------------
+
+- Eliminated dependency on pyanitools for loading ANI-style H5 datasets.
+- SNAPjson format can now support an optional number of comment lines.
+- Added unit conversion options to the LAMMPS interface.
+- Improved performance of bond order regression.
+- It is now possible to limit the memory usage of the MLIAP interface in LAMMPS
+  using a library setting.
+- Provide tunable regularization of HIP-NN-TS with an epsilon parameter, and
+  set the default to use a better value for epsilon.
+- Improved detection of valid custom kernel implementation.
+- Improved computational efficiency of HIP-NN-TS network.
+- ``StressForceNode`` now also works with batch size greater than 1.
+- Allow testing of splits of arbitrary names using test_model, as long as those splits contain the required variables.
+
+
+Bug Fixes:
+----------
+
+- Fixed bug where custom kernels were not launching properly on non-default GPUs
+- Fixed error when LAMMPS interface is in kokkos mode and the kokkos device was set to CPU.
+- MLIAPInterface objects
+- Fixed bug with RDF computer automatic initialization.
+- KDTreeNeighbors finds at most one pair for each set of points. If pair cutoff is more than half
+  the length of one of the cell sides, it will fail to identify all of the pairs. Added error if
+  this occurs.
+
 0.0.3
 =======
 

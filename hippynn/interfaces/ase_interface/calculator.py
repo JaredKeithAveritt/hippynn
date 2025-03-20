@@ -4,7 +4,7 @@ import numpy as np
 import warnings
 import torch
 
-from ase.calculators.calculator import compare_atoms, PropertyNotImplementedError, Calculator # Calculator is required to allow HIPNN to be used with ASE Mixing Calculators
+from ase.calculators.calculator import compare_atoms, PropertyNotImplementedError, Calculator
 
 from hippynn.graphs import find_relatives, find_unique_relative, get_subgraph, copy_subgraph, replace_node, GraphModule
 from hippynn.graphs.gops import check_link_consistency
@@ -16,7 +16,7 @@ from hippynn.graphs.nodes.pairs import ExternalNeighborIndexer
 from hippynn.graphs.nodes.misc import StrainInducer
 from hippynn.graphs.nodes.physics import CoulombEnergyNode, DipoleNode, StressForceNode
 from hippynn.graphs.nodes.pairs import PairFilter
-
+from hippynn.graphs.nodes.targets import AtomizationEnergyNode
 from hippynn.graphs.nodes.inputs import SpeciesNode, PositionsNode, CellNode
 
 
@@ -26,7 +26,9 @@ import ase.neighborlist
 # This works for orthorhombic boxes and is much faster than ASE...
 
 
-def setup_ASE_graph(energy, charges=None, extra_properties=None):
+def setup_ASE_graph(energy, charges=None, extra_properties=None, species_set=None,indexer=None):
+    if isinstance(energy, AtomizationEnergyNode):
+        energy = energy.create_henergy_equivalent()
 
     if charges is None:
         required_nodes = [energy]
@@ -64,7 +66,7 @@ def setup_ASE_graph(energy, charges=None, extra_properties=None):
     # The required nodes passed back are copies of the ones passed in.
     # We use assume_inputed to avoid grabbing pieces of the graph
     # that are only prerequisites for the pair indexer.
-    new_required, new_subgraph = copy_subgraph(required_nodes, assume_inputed=pair_indexers, tag="ASE")
+    new_required, new_subgraph = copy_subgraph(required_nodes, assume_inputed=pair_indexers)
     # We now need access to the copied indexers, rather than the originals
     pair_indexers = find_relatives(new_required, search_fn(PairIndexer, new_subgraph), why_desc=why)
 
@@ -72,21 +74,23 @@ def setup_ASE_graph(energy, charges=None, extra_properties=None):
     positions = find_unique_relative(new_required, search_fn(PositionsNode, new_subgraph), why_desc=why)
 
     # TODO: is .clone necessary? Or good? Or torch.as_tensor instead?
-    encoder = find_unique_relative(species, search_fn(Encoder, new_subgraph), why_desc=why)
-    species_set = torch.as_tensor(encoder.species_set).to(torch.int64)  # works with lists or tensors
-    indexer = find_unique_relative(species, search_fn(AtomIndexer, new_subgraph), why_desc=why)
+    if species_set is None:
+        encoder = find_unique_relative(species, search_fn(Encoder, new_subgraph), why_desc=why)
+        species_set = torch.as_tensor(encoder.species_set).to(torch.int64)  # works with lists or tensors
+    if indexer is None:
+        indexer = find_unique_relative(species, search_fn(AtomIndexer, new_subgraph), why_desc=why)
     min_radius = max(p.dist_hard_max for p in pair_indexers)
     ###############################################################
 
     ###############################################################
     # Set up graph to accept external pair indices and shifts
 
-    in_shift = InputNode("(ASE)shift_vector")
-    in_cell = CellNode("(ASE)cell")
-    in_pair_first = InputNode("(ASE)pair_first")
-    in_pair_second = InputNode("(ASE)pair_second")
+    in_shift = InputNode("shift_vector")
+    in_cell = CellNode("cell")
+    in_pair_first = InputNode("pair_first")
+    in_pair_second = InputNode("pair_second")
     external_pairs = ExternalNeighborIndexer(
-        "(ASE)EXTERNAL_NEIGHBORS",
+        "external_neighbors",
         (positions, indexer.real_atoms, in_shift, in_cell, in_pair_first, in_pair_second),
         hard_dist_cutoff=min_radius,
     )
@@ -102,7 +106,7 @@ def setup_ASE_graph(energy, charges=None, extra_properties=None):
             mapped_node = external_pairs
         else:
             mapped_node = PairFilter(
-                "DistanceFilter-(ASE)EXTERNAL_NEIGHBORS",
+                "DistanceFilter_external_neighbors",
                 (external_pairs),
                 dist_hard_max=pi.dist_hard_max, 
             )
@@ -114,9 +118,9 @@ def setup_ASE_graph(energy, charges=None, extra_properties=None):
 
     energy, *new_required = new_required
 
-    cellscaleinducer = StrainInducer("(ASE)Strain_inducer", (positions, in_cell))
+    cellscaleinducer = StrainInducer("Strain_inducer", (positions, in_cell))
     strain = cellscaleinducer.strain
-    derivatives = StressForceNode("(ASE)StressForceCalculator", (energy, strain, positions, in_cell))
+    derivatives = StressForceNode("StressForceCalculator", (energy, strain, positions, in_cell))
 
     replace_node(positions, cellscaleinducer.strained_coordinates)
     replace_node(in_cell, cellscaleinducer.strained_cell)
@@ -128,7 +132,7 @@ def setup_ASE_graph(energy, charges=None, extra_properties=None):
 
     if charges is not None:
         charges, *new_required = new_required
-        dipole_moment = DipoleNode("(ASE)DIPOLE", charges)
+        dipole_moment = DipoleNode("Dipole", charges)
         implemented_nodes = *implemented_nodes, charges.main_output, dipole_moment
         implemented_properties = implemented_properties + ["charges", "dipole_moment"]
 
@@ -214,7 +218,7 @@ class HippynnCalculator(Calculator): # Calculator inheritance required for ASE M
     ASE calculator based on hippynn graphs. Uses ASE neighbor lists. Not suitable for domain decomposition.
     """
 
-    def __init__(self, energy, charges=None, skin=1.0, extra_properties=None, en_unit=None, dist_unit=None):
+    def __init__(self, energy, charges=None, skin=1.0, extra_properties=None, en_unit=None, dist_unit=None, species_set=None, indexer=None):
         """
         :param energy: Node for energy
         :param charges: Node for charges (optional)
@@ -228,7 +232,7 @@ class HippynnCalculator(Calculator): # Calculator inheritance required for ASE M
         """
 
         self.min_radius, self.species_set, self.implemented_properties, self.module, self.pbc = setup_ASE_graph(
-            energy, charges=charges, extra_properties=extra_properties
+            energy, charges=charges, extra_properties=extra_properties, species_set=species_set,indexer=indexer,
         )
         
         self.implemented_properties.append("energy") # Required for using mixing calculators in ASE
@@ -336,9 +340,8 @@ class HippynnCalculator(Calculator): # Calculator inheritance required for ASE M
         # Convert from ASE distance (angstrom) to whatever the network uses.
         positions = positions / self.dist_unit
         species = torch.as_tensor(self.atoms.numbers,dtype=torch.long).unsqueeze(0)
-        cell = torch.as_tensor(self.atoms.cell.array)  # ExternalNieghbors doesn't take batch index
+        cell = torch.as_tensor(self.atoms.cell.array).unsqueeze(0)
         # Get pair first and second from neighbors list
-
         pair_first = torch.as_tensor(self.nl.nl.pair_first,dtype=torch.long)
         pair_second = torch.as_tensor(self.nl.nl.pair_second,dtype=torch.long)
         pair_shiftvecs = torch.as_tensor(self.nl.nl.offset_vec,dtype=torch.long)

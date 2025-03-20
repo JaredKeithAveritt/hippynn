@@ -13,6 +13,12 @@ class HEnergy(torch.nn.Module):
     """
 
     def __init__(self, feature_sizes, first_is_interacting=False, n_target=1):
+        """
+
+        :param feature_sizes: size of features at each level
+        :param first_is_interacting: whether to drop the first set of (non-interacting) features.
+        :param n_target: number of items to regress to.
+        """
 
         super().__init__()
         self.first_is_interacting = first_is_interacting
@@ -195,29 +201,31 @@ class HBondSymmetric(torch.nn.Module):
         sense_vals = self.sensitivity(pair_dist)
 
         n_d, n_t, n_f, _ = self.weights[0].shape
+        
+        # NOTE: Old code left here for posterity. At the current moment (Aug 23), this code is far slower.
         # These are the contributions for each bond at a given sensitivity distance
         # bilinear takes shape (pair,feature1),(pair,feature2),(ndist*n_target,feature1,feature2)
         # and sums to pair,(ndist*n_target), which is reshaped.
-        partial_bond_dists = [
-            torch.nn.functional.bilinear(
-                f[pair_first],
-                f[pair_second],
-                w.reshape(self.n_dist * self.n_target, f.shape[-1], f.shape[-1]),
-                bias=None,
-            ).reshape(-1, self.n_dist, self.n_target)
-            for f, w in zip(all_features, weights)
-        ]
-
+        #partial_bond_dists = [
+        #    torch.nn.functional.bilinear(
+        #        f[pair_first],
+        #        f[pair_second],
+        #        w.reshape(self.n_dist * self.n_target, f.shape[-1], f.shape[-1]),
+        #        bias=None,
+        #    ).reshape(-1, self.n_dist, self.n_target)
+        #    for f, w in zip(all_features, weights)
+        #]
         # These are the contributions for each bond
         # multiply pair,ndist by pair,ndist,n_targets
-        partial_bonds = [(pbd * sense_vals.unsqueeze(2)).sum(dim=1) for pbd in partial_bond_dists]
-        # NOTE:
-        # Einsum implementation of combined partial_bond_dists and partial_bond operations, seems to be slower.
-        # But leaving this comment here for readability.
-        # partial_bonds = [
-        #     torch.einsum("bf,bg,bs,stfg->bt",f[pair_first],f[pair_second],sense_vals,w)
-        #     for f,w in zip(all_features,weights)
-        # ]
+        #partial_bonds = [(pbd * sense_vals.unsqueeze(2)).sum(dim=1) for pbd in partial_bond_dists]
+        
+        # NOTE: This code is faster now that pytorch as opt_einsum features built in.
+        # Einsum implementation of combined partial_bond_dists and partial_bond operations..
+        partial_bonds = [
+            torch.einsum("bf,bg,bs,stfg->bt",f[pair_first],f[pair_second],sense_vals,w)
+            for f,w in zip(all_features,weights)
+        ]
+        
 
         if self.positive:
             partial_bonds = [pb + b for pb, b in zip(partial_bonds, self.biases)]
@@ -232,6 +240,59 @@ class HBondSymmetric(torch.nn.Module):
             bond_hier = sum(partial_hier)
         else:
             bond_hier = torch.zeros_like(total_bonds)
+        
         return total_bonds, bond_hier
 
 
+class AtomizationEnergy(torch.nn.Module):
+    def __init__(self, feature_sizes, decay_factor=0.01):
+        super().__init__()
+
+        # TODO: Add n_targets and alternative hierarchicality definitions
+        # to this layer and node.
+        feature_sizes = feature_sizes[1:]
+        self.feature_sizes = feature_sizes
+
+
+        self.summer = indexers.MolSummer()
+        self.n_terms = len(feature_sizes)
+        self.layers = torch.nn.ModuleList(torch.nn.Linear(nf, 1, bias=False)
+                                          for nf in feature_sizes)
+
+        for layer in self.layers:
+            layer.weight.data *= decay_factor
+            decay_factor *= decay_factor
+
+        # This is hard-coded for this module, for compatibility with HEnergy
+        # see how this operates in the `forward` method.
+        self.first_is_interacting = True
+
+    def forward(self, all_features, vacuum_features, encoding, mol_index, n_molecules):
+
+        # Don't need the non-interacting features,
+        # they contribute zero total for this layer, by definition the any component would cancel.
+        # this is why we hardcode first_is_interacting in the `__init__` method.
+        vacuum_features = vacuum_features[1:]
+        all_features = all_features[1:]
+
+        # get vacuum features for each atom and subtract them
+        vacuum_energies = sum([lay(x) for x, lay in zip(vacuum_features, self.layers)])
+        encoding = encoding.to(all_features[0].dtype)
+        vacuum_features_eachatom = [encoding @ f for f in vacuum_features]
+        renorm_features = [x - v for x, v in zip(all_features, vacuum_features_eachatom)]
+
+        # Compute!
+        en_terms = [lay(r) for r, lay in zip(renorm_features, self.layers)]
+        total_atomen = sum(en_terms)
+        total_energies = self.summer(total_atomen, mol_index, n_molecules)
+
+        e0 = encoding @ vacuum_energies
+        if self.n_terms > 1:
+            partial_esq = [x ** 2 for x in en_terms]
+            partial_atom_hier = [x / (x + y) for x, y in zip(partial_esq[1:], partial_esq[:-1])]
+            total_atom_hier = sum(x for x in partial_atom_hier)
+            total_hier = self.summer(total_atom_hier, mol_index, n_molecules)
+        else:
+            total_hier = torch.zeros_like(total_energies)
+
+        return total_energies, en_terms, total_hier
