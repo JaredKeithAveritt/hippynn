@@ -172,6 +172,8 @@ class MetaDatabase(Database):
         pair_dist_hard_max=5,
         write_metadata_to_json=True,
         json_filename='metadata.json',
+        write_metadata_to_csv=True,
+        csv_filename='metadata.csv',
         distribution_plots=False,  
         density_range=None,
         max_force_range=None,
@@ -199,6 +201,8 @@ class MetaDatabase(Database):
         self.pair_dist_hard_max = pair_dist_hard_max
         self.write_metadata_to_json = write_metadata_to_json
         self.json_filename = json_filename
+        self.write_metadata_to_csv = write_metadata_to_csv
+        self.csv_filename = csv_filename
         self.distribution_plots = distribution_plots 
 
         self.atomic_numbers_in_dataset = None
@@ -1044,14 +1048,14 @@ class MetaDatabase(Database):
 
         try:
             self.calculate_atom_counts()
-            metadata_updates["atom_counts_by_symbol"] = self.get_atom_counts_by_symbol()
+            metadata_updates["atom_count"] = self.get_atom_counts_by_symbol()
         except Exception as e:
             if not quiet:
                 print(f"Error calculating atom counts: {e}")
 
         try:
             self.extract_unique_numbers_large()
-            metadata_updates["number_of_entries_for_each_combination_of_atom_types"] = self.get_element_combinations()
+            metadata_updates["atom_count_coincidence"] = self.get_element_combinations()
         except Exception as e:
             if not quiet:
                 print(f"Error extracting unique atomic combinations: {e}")
@@ -1074,7 +1078,13 @@ class MetaDatabase(Database):
                 if not quiet:
                     print(f"Error saving metadata to JSON: {e}")
 
-
+        # Save metadata to JSON
+        if self.write_metadata_to_json:
+            #try:
+            self.save_metadata_to_csv()
+            #except Exception as e:
+            #    if not quiet:
+            #        print(f"Error saving metadata to CSV: {e}")
 
     def make_json_serializable(self):
         """
@@ -1105,6 +1115,24 @@ class MetaDatabase(Database):
         json_compatible_metadata = self.make_json_serializable()
         with open(self.json_filename, "w") as f:
             json.dump(json_compatible_metadata, f, indent=4)
+    
+    def save_metadata_to_csv(self):
+        csv_compatible_metadata={}
+        def flatten_dict(d,path=None):
+            if path is None:
+                path = []
+            for key, value in d.items():
+                current_path = path + [key]
+                if isinstance(value, dict):
+                    flatten_dict(value, current_path)
+                else:
+                    csv_compatible_metadata["_".join(current_path)] = str(value)
+        json_compatible_metadata = self.make_json_serializable()
+        print(json_compatible_metadata)
+        flatten_dict(json_compatible_metadata)
+        with open(self.csv_filename, "w") as f:
+            for key, value in csv_compatible_metadata.items():
+                f.write('{:s},{:s}\n'.format(key,value))
 
     def plot_distributions(
         self,
