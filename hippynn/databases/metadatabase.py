@@ -231,9 +231,15 @@ class MetaDatabase(Database):
         if self.distribution_plots:
             self.plot_distributions() 
             
-    #
-    #  Entry level Metadata
-    #
+    # ─── Utility ────────────────────────────────────────────────────────────────
+
+    def _to_numpy(self, data):
+        """Convert a torch.Tensor to numpy.ndarray, leave numpy arrays unchanged."""
+        if isinstance(data, torch.Tensor):
+            return data.detach().cpu().numpy()
+        return data
+
+    # ─── Entry-level Metadata ────────────────────────────────────────────────────
 
 
     def set_entry_metadata(self, index: int, metadata: dict[str, object]):
@@ -252,8 +258,8 @@ class MetaDatabase(Database):
 
     def remove_entry_metadata(self, index: int):
         """Remove metadata for a specific entry."""
-        if index in self.entry_metadata:
-            del self.entry_metadata[index]
+        self.entry_metadata.pop(index, None)
+
             
     def print_all_entry_metadata(self):
         """Print metadata for all entries."""
@@ -263,20 +269,15 @@ class MetaDatabase(Database):
 
     def metadata_generator(self):
         """
-        Generator that yields individual data entries from the database.
+        Yield dicts {'species': tensor/array, 'coordinates': tensor/array} per entry.
+        Converts to numpy for downstream parsing.
         """
-        species_array = self.arr_dict[self.species_key]
-        coordinates_array = self.arr_dict[self.coordinates_key]
-        num_entries = len(species_array)
-        for i in range(num_entries):
-            yield {
-                self.species_key: species_array[i],
-                'coordinates': coordinates_array[i],
-            }
+        species_arr = self._to_numpy(self.arr_dict[self.species_key])
+        coords_arr = self._to_numpy(self.arr_dict[self.coordinates_key])
+        for sp, cr in zip(species_arr, coords_arr):
+            yield {self.species_key: sp, 'coordinates': cr}
 
-    #
-    #  Global Metadata
-    #
+    # ─── Global Metadata ────────────────────────────────────────────────────────
     
     def set_metadata(self, key: str, value: object):
         """Set a global metadata field."""
@@ -301,9 +302,7 @@ class MetaDatabase(Database):
         for key, value in self.metadata.items():
             print(f"  {key}: {value}")
             
-    #
-    #  Atom type and mass Mapping Functions
-    #
+    # ─── Atom/Mass Mapping ───────────────────────────────────────────────────────
 
     def convert_atomic_number_to_symbol(self):
         """
@@ -316,7 +315,6 @@ class MetaDatabase(Database):
         Returns a dictionary mapping element symbols to their atomic numbers using ASE's chemical_symbols array.
         """
         return {symbol: i for i, symbol in enumerate(chemical_symbols) if symbol}
-
 
     def atomic_masses(self):
         """
@@ -334,11 +332,11 @@ class MetaDatabase(Database):
         
         if mass_unit not in conversion_factors:
             raise ValueError(f"Unsupported mass unit: {mass_unit}. Supported units: {list(conversion_factors.keys())}")
-        
         factor = conversion_factors[mass_unit]
         
-        # Dynamically map atomic masses from ASE
-        return {symbol: atomic_masses[i] * factor for i, symbol in enumerate(chemical_symbols) if symbol}
+        # Dynamically map tomic masses from ASE
+        return {symbol: atomic_masses[i] * factor 
+                for i, symbol in enumerate(chemical_symbols) if symbol}
 
     def get_mass_from_species(self, species):
         if species == 0:
@@ -351,17 +349,13 @@ class MetaDatabase(Database):
         return 0.0  # Return 0.0 if species is invalid or not found
   
 
-    #
-    #  Data parsing Functions
-    #
+    # ─── Parsing & Extraction ────────────────────────────────────────────────────
 
     def extract_element_combinations_large(self, chunk_size=100000):
         """
         Parse the database in chunks to extract and count element combinations.
-
         Args:
             chunk_size: The max number of entries to process in one batch (to avoid loading too much into memory).
-
         Returns:
             A dictionary with element combinations (given by atomic number) and their counts.
         """
@@ -385,7 +379,6 @@ class MetaDatabase(Database):
     def extract_unique_numbers_large(self):
         """
         Parse the database in chunks to extract unique atomic numbers.
-
         Returns:
             A sorted list of unique atomic numbers in the dataset.
         """
@@ -394,10 +387,8 @@ class MetaDatabase(Database):
         self.atomic_numbers_in_dataset = sorted(unique_numbers)
         return self.atomic_numbers_in_dataset
 
+    # ─── Geometric & Physical Calculations ─────────────────────────────────────
 
-    #
-    #  Data calculation Functions
-    #
     def calculate_volume(self, coordinates, cell=None):
         """
         Compute the bounding box volume for a set of coordinates.
@@ -432,10 +423,7 @@ class MetaDatabase(Database):
     
         return results
     
-    
 
-
-    
     #
     #  Pair Finder Function
     #
