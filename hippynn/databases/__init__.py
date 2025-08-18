@@ -31,7 +31,7 @@ if has_ase:
 all_list = ["Database", "DirectoryDatabase", "NPZDatabase"]
 
 if has_ase:
-    all_list += ["AseDatabase", "AseDatabaseIterable", "SNAPDirectoryDatabase"]
+    all_list += ["AseDatabase", "AseDatabaseIterable", "SNAPDirectoryDatabase", "MetaDatabase"]
     if has_h5:
         all_list += ["PyAniFileDB", "PyAniDirectoryDB"]
 __all__ = all_list
