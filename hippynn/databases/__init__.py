@@ -25,6 +25,7 @@ except ImportError:
 if has_ase:
     from ..interfaces.ase_interface import AseDatabase, AseDatabaseIterable
     from .SNAPJson import SNAPDirectoryDatabase
+    from .metadatabase import MetaDatabase
     if has_h5:
         from .h5_pyanitools import PyAniFileDB, PyAniDirectoryDB
 
