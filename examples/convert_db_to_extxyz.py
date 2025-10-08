@@ -78,3 +78,7 @@ Zn_base_database=NPZDatabase(
 
 from hippynn.databases.xyz_database_tools import write_extxyz
 write_extxyz(db, "zn_db.extxyz", overwrite=True, pbc=(False, False, False))
+
+# Need to add function to read_extxyz():
+#from hippynn.databases.xyz_database_tools import write_extxyz
+#read_extxyz("zn_db.extxyz", db_in, pbc=(False, False, False))
