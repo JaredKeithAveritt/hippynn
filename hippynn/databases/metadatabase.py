@@ -156,6 +156,117 @@ class MetaDatabase(Database):
 
 
     """
+
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+import sys
+import torch
+sys.path.append("/Users/394919/transfer_from_mac/Documants/programs/ANI-Tools-update/lib")
+from hippynn.databases.h5_pyanitools import PyAniFileDB
+
+AVAIL_METHODS, AVAIL_BASIS = ['hf', 'wb97x', 'ccsd(t)', 'mp2'], ['dz', 'tz', 'qz', 'cbs']
+ANI1X_DSETS_KEYS = [
+    'hf_tz.energy', 'coordinates', 'tpno_ccsd(t)_dz.corr_energy', 'wb97x_dz.hirshfeld_charges', 
+    'wb97x_tz.mbis_charges', 'wb97x_tz.forces', 'mp2_tz.corr_energy', 'npno_ccsd(t)_tz.corr_energy', 
+    'wb97x_tz.mbis_volumes', 'wb97x_tz.energy', 'wb97x_tz.dipole', 'wb97x_tz.mbis_octupoles', 
+    'wb97x_tz.mbis_quadrupoles', 'mp2_qz.corr_energy', 'wb97x_tz.mbis_dipoles', 'wb97x_dz.cm5_charges', 
+    'path', 'atomic_numbers', 'hf_qz.energy', 'mp2_dz.corr_energy', 'wb97x_dz.dipole', 
+    'npno_ccsd(t)_dz.corr_energy', 'wb97x_dz.energy', 'hf_dz.energy', 'wb97x_dz.quadrupole', 
+    'ccsd(t)_cbs.energy', 'wb97x_dz.forces'
+]
+
+# Helper Functions
+def load_db(db_info, en_name, force_name, seed, location, n_workers):
+    torch.set_default_dtype(torch.float64)
+    return PyAniFileDB(
+        file=location, species_key='species', seed=seed, num_workers=n_workers, 
+        allow_unfound=True, 
+        **db_info
+    )
+
+def get_data_names(qm_method, basis_set, force_training=False):
+    assert qm_method in AVAIL_METHODS, f"Method not found: {qm_method}"
+    assert basis_set in AVAIL_BASIS, f"Basis set not found: {basis_set}"
+    spec = f"{qm_method}_{basis_set}"
+    en_name = f"{spec}.energy"
+    assert en_name in ANI1X_DSETS_KEYS, f"Data spec not available: {spec}"
+    if force_training:
+        assert f"{spec}.forces" in ANI1X_DSETS_KEYS, f"No force training for: {spec}"
+    return en_name, f"{spec}.forces"
+
+force_training = False
+qm_method, basis_set = 'wb97x', 'dz'
+en_name, force_name = get_data_names(qm_method, basis_set, force_training)
+inputs = ['coordinates', 'species']
+targets = ['energies', 'forces']
+db_info = {"inputs": inputs , "targets": targets}
+
+ani_base_database = load_db(db_info, 
+                            en_name, 
+                            force_name, 
+                            #allow_unfound=True,
+                            seed=101, 
+                            location='ANI-2x-wb97xdz.h5', 
+                            n_workers=2)
+
+# Output for verification
+#print(en_name, force_name)
+
+
+from hippynn.databases import NPZDatabase
+
+# Define the inputs and targets
+inputs = ['coordinates', 'species']
+targets = ['energy', 'forces']
+
+# Initialize the base hippynn database
+Zn_base_database=NPZDatabase(
+                     file='Zn-all-AE.npz', 
+                     seed=101, 
+                     allow_unfound=True,
+                     inputs=inputs,
+                     targets=targets,
+                     quiet=False
+)
+
+
+
+"""
+MetaDatabase
+
+Parses a `Database` object to extract species, positions, forces, and other relevant data,
+organizing them into structured metadata. Calculates metrics such as force magnitudes,
+pairwise atomic distances, and simulation box densities to facilitate data searching
+and visualization.
+
+Designed for easy extension with additional metadata calculations and visualization methods.
+"""
+import json
+import re
+from collections import defaultdict, Counter
+from itertools import islice
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+from ase.data import atomic_masses, chemical_symbols
+from ase.units import _amu
+from scipy.spatial.distance import cdist
+
+from hippynn.databases.database import Database
+from hippynn.pretraining import compute_hipnn_e0
+from hippynn.layers.indexers import OneHotSpecies
+
+
+class MetaDatabase(Database):
+    """
+    MetaDatabase
+
+    A class to parse a database object and generate a metadata representation.
+    This metadata facilitates searching, filtering, and visualization of the underlying representations.
+    """
+
     def __init__(
         self,
         arr_dict,
@@ -167,14 +278,14 @@ class MetaDatabase(Database):
         forces_key='forces',
         cell_key=None,
         metadata: dict[str, object] = None,
-        entry_metadata: dict[int, dict[str, object]] = None,  
+        entry_metadata: dict[int, dict[str, object]] = None,
         populate_metadata=True,
-        pair_dist_hard_max=5,
+        pair_dist_hard_max=5.0,
         write_metadata_to_json=True,
         json_filename='metadata.json',
         write_metadata_to_csv=True,
         csv_filename='metadata.csv',
-        distribution_plots=False,  
+        distribution_plots=False,
         density_range=None,
         max_force_range=None,
         min_distance_range=None,
@@ -184,37 +295,33 @@ class MetaDatabase(Database):
         peratom=False,
         **kwargs
     ):
+        # Global and per-entry metadata
         self.metadata = metadata.copy() if metadata else {}
         self.entry_metadata = entry_metadata.copy() if entry_metadata else {}
 
+        # Initialize base Database
         super().__init__(
             arr_dict=arr_dict,
             inputs=inputs,
             targets=targets,
             **kwargs
         )
+
+        # Keys
         self.species_key = species_key
         self.coordinates_key = coordinates_key
         self.energies_key = energies_key
         self.forces_key = forces_key
         self.cell_key = cell_key
+
+        # Settings
         self.pair_dist_hard_max = pair_dist_hard_max
         self.write_metadata_to_json = write_metadata_to_json
         self.json_filename = json_filename
         self.write_metadata_to_csv = write_metadata_to_csv
         self.csv_filename = csv_filename
-        self.distribution_plots = distribution_plots 
 
-        self.atomic_numbers_in_dataset = None
-        self.element_combinations = None
-        self.atom_counts = None
-        self.entry_species_index = None
-        self.densities = None
-        self.max_force = None
-        self.min_force = None
-        self.min_distance = None
-
-        # Distribution plot settings
+        # Distribution / filtering settings
         self.distribution_plots = distribution_plots
         self.density_range = density_range
         self.max_force_range = max_force_range
@@ -223,14 +330,26 @@ class MetaDatabase(Database):
         self.bins = bins
         self.alpha = alpha
         self.peratom = peratom
+
+        # Computed caches
+        self.atomic_numbers_in_dataset = None
+        self.element_combinations = None
+        self.atom_counts = None
+        self.entry_species_index = None
+        self.densities = None
+        self.max_force = None
+        self.min_force = None
+        self.min_distance = None
         self.E0_regression = None
-        
+
+        # Auto-populate metadata
         if populate_metadata:
             self.populate_metadata(update=True, quiet=False)
 
+        # Optional plots
         if self.distribution_plots:
-            self.plot_distributions() 
-            
+            self.plot_distributions()
+
     # ─── Utility ────────────────────────────────────────────────────────────────
 
     def _to_numpy(self, data):
@@ -241,31 +360,24 @@ class MetaDatabase(Database):
 
     # ─── Entry-level Metadata ────────────────────────────────────────────────────
 
-
     def set_entry_metadata(self, index: int, metadata: dict[str, object]):
-        """Set metadata for a specific entry."""
         self.entry_metadata[index] = metadata
 
     def get_entry_metadata(self, index: int) -> dict[str, object]:
-        """Get metadata for a specific entry."""
         return self.entry_metadata.get(index, {})
 
     def update_entry_metadata(self, index: int, metadata: dict[str, object]):
-        """Update metadata for a specific entry."""
         if index not in self.entry_metadata:
             self.entry_metadata[index] = {}
         self.entry_metadata[index].update(metadata)
 
     def remove_entry_metadata(self, index: int):
-        """Remove metadata for a specific entry."""
         self.entry_metadata.pop(index, None)
 
-            
     def print_all_entry_metadata(self):
-        """Print metadata for all entries."""
         print("Entry Metadata:")
-        for index, metadata in self.entry_metadata.items():
-            print(f"Entry {index}: {metadata}")
+        for idx, md in self.entry_metadata.items():
+            print(f"  Entry {idx}: {md}")
 
     def metadata_generator(self):
         """
@@ -278,954 +390,563 @@ class MetaDatabase(Database):
             yield {self.species_key: sp, 'coordinates': cr}
 
     # ─── Global Metadata ────────────────────────────────────────────────────────
-    
+
     def set_metadata(self, key: str, value: object):
-        """Set a global metadata field."""
         self.metadata[key] = value
 
     def get_metadata(self, key: str):
-        """Get a global metadata field."""
-        return self.metadata.get(key, None)
+        return self.metadata.get(key)
 
-    def update_metadata(self, new_metadata: dict[str, object]):
-        """Update the global metadata dictionary."""
-        self.metadata.update(new_metadata)
+    def update_metadata(self, new_md: dict[str, object]):
+        self.metadata.update(new_md)
 
     def remove_metadata(self, key: str):
-        """Remove global metadata for a specific key."""
-        if key in self.metadata:
-            del self.metadata[key]
+        self.metadata.pop(key, None)
 
     def print_metadata(self):
-        """Print global metadata in a readable format."""
         print("Metadata:")
-        for key, value in self.metadata.items():
-            print(f"  {key}: {value}")
-            
+        for k, v in self.metadata.items():
+            print(f"  {k}: {v}")
+
     # ─── Atom/Mass Mapping ───────────────────────────────────────────────────────
 
     def convert_atomic_number_to_symbol(self):
-        """
-        Returns a dictionary mapping atomic numbers to element symbols using ASE's chemical_symbols array.
-        """
-        return {i: symbol for i, symbol in enumerate(chemical_symbols) if symbol}
+        return {i: sym for i, sym in enumerate(chemical_symbols) if sym}
 
     def convert_symbol_to_atomic_number(self):
-        """
-        Returns a dictionary mapping element symbols to their atomic numbers using ASE's chemical_symbols array.
-        """
-        return {symbol: i for i, symbol in enumerate(chemical_symbols) if symbol}
+        return {sym: i for i, sym in enumerate(chemical_symbols) if sym}
 
     def atomic_masses(self):
-        """
-        Returns a dictionary of atomic masses based on the specified unit.
-        Supported units: 'grams/mol', 'amu', 'kg'.
-        """
-        mass_unit = self.metadata.get("Mass_unit", "grams/mol")  # Default to grams/mol
-        
-        # Define conversion factors
-        conversion_factors = {
-            "grams/mol": 1.0,  # In other words, no conversion needed
-            "amu": 1.0 / 1.66053906660e-24,  # Convert to Atomic mass units
-            "kg": _amu  # Convert grams/mol to kg using ASE's atomic mass unit
+        unit = self.metadata.get("Mass_unit", "grams/mol")
+        conv = {
+            "grams/mol": 1.0,
+            "amu": 1.0 / 1.66053906660e-24,
+            "kg": _amu
         }
-        
-        if mass_unit not in conversion_factors:
-            raise ValueError(f"Unsupported mass unit: {mass_unit}. Supported units: {list(conversion_factors.keys())}")
-        factor = conversion_factors[mass_unit]
-        
-        # Dynamically map tomic masses from ASE
-        return {symbol: atomic_masses[i] * factor 
-                for i, symbol in enumerate(chemical_symbols) if symbol}
+        if unit not in conv:
+            raise ValueError(f"Unsupported Mass_unit: {unit}")
+        factor = conv[unit]
+        return {sym: atomic_masses[i] * factor
+                for i, sym in enumerate(chemical_symbols) if sym}
 
     def get_mass_from_species(self, species):
         if species == 0:
-            return 0.0  # Assuming atomic number 0 represents padding in hippynn database
+            return 0.0
         masses = self.atomic_masses()
-        number_to_symbol = self.convert_atomic_number_to_symbol()
-        symbol = number_to_symbol.get(species)
-        if symbol and symbol in masses:
-            return masses[symbol]
-        return 0.0  # Return 0.0 if species is invalid or not found
-  
+        num2sym = self.convert_atomic_number_to_symbol()
+        sym = num2sym.get(species)
+        return masses.get(sym, 0.0)
 
     # ─── Parsing & Extraction ────────────────────────────────────────────────────
 
-    def extract_element_combinations_large(self, chunk_size=100000):
-        """
-        Parse the database in chunks to extract and count element combinations.
-        Args:
-            chunk_size: The max number of entries to process in one batch (to avoid loading too much into memory).
-        Returns:
-            A dictionary with element combinations (given by atomic number) and their counts.
-        """
-        element_combinations = Counter()
-        data_gen = self.metadata_generator()
-
-        while True:
-            chunk = list(islice(data_gen, chunk_size))
-            if not chunk:
-                break  # Stop when the generator is exhausted
-
-            for data in chunk:
-                # Count unique combinations of species
-                species = data[self.species_key]
-                unique_species = tuple(sorted(set(species[species != 0])))
-                element_combinations[unique_species] += 1
-
-        self.element_combinations = dict(element_combinations)
+    def extract_element_combinations_large(self, chunk_size=100_000):
+        combos = Counter()
+        for entry in self.metadata_generator():
+            sp = entry[self.species_key]
+            unique = tuple(sorted(set(sp[sp != 0])))
+            combos[unique] += 1
+        self.element_combinations = dict(combos)
         return self.element_combinations
 
     def extract_unique_numbers_large(self):
-        """
-        Parse the database in chunks to extract unique atomic numbers.
-        Returns:
-            A sorted list of unique atomic numbers in the dataset.
-        """
-        self.extract_element_combinations_large(chunk_size=100000)
-        unique_numbers = set(num for combo in self.element_combinations.keys() for num in combo)
-        self.atomic_numbers_in_dataset = sorted(unique_numbers)
+        self.extract_element_combinations_large()
+        nums = {n for combo in self.element_combinations for n in combo}
+        self.atomic_numbers_in_dataset = sorted(nums)
         return self.atomic_numbers_in_dataset
 
+    
     # ─── Geometric & Physical Calculations ─────────────────────────────────────
 
     def calculate_volume(self, coordinates, cell=None):
-        """
-        Compute the bounding box volume for a set of coordinates.
-        Optionally, use the simulation box volume from the cell matrix.
-    
-        Args:
-            coordinates (np.ndarray): Cartesian positions of atoms in a single database entry.
-            cell (np.ndarray or None): The cell matrix defining the simulation box (3x3).
-    
-        Returns:
-            dict: A dictionary containing:
-                - "bounding_box_volume": Volume of the bounding box enclosing the coordinates.
-                - "cell_volume": Volume of the simulation box (if cell is provided).
-        """
-        results = {"bounding_box_volume": None, "cell_volume": None}
-    
-        # Calculate the bounding box volume
-        if len(coordinates) > 0:
-            x_min, y_min, z_min = coordinates.min(axis=0)
-            x_max, y_max, z_max = coordinates.max(axis=0)
-            bounding_box_volume = (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
-            results["bounding_box_volume"] = bounding_box_volume
-        else:
-            return results  # Return early if coordinates are empty
-    
-        # Calculate the simulation box volume if cell is provided
+        coords = self._to_numpy(coordinates)
+        res = {"bounding_box_volume": None, "cell_volume": None}
+        if coords.size > 0:
+            mins = coords.min(axis=0)
+            maxs = coords.max(axis=0)
+            res["bounding_box_volume"] = np.prod(maxs - mins)
         if cell is not None:
-            if cell.shape != (3, 3):
-                raise ValueError("Cell must be a 3x3 matrix.")
-            cell_volume = np.abs(np.linalg.det(cell))
-            results["cell_volume"] = cell_volume
+            cell_np = self._to_numpy(cell)
+            if cell_np.shape != (3, 3):
+                raise ValueError("Cell must be 3×3")
+            res["cell_volume"] = abs(np.linalg.det(cell_np))
+        return res
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
-        return results
-    
-
-    #
-    #  Pair Finder Function
-    #
-
-
     def find_pairs(self, coordinates, species, cell=None, periodic=True):
-        """
-        Finds pairs of atoms within a specified hard_cutoff_distance.
-
-        Args:
-            coordinates (np.ndarray): Atom coordinates of shape (N, 3).
-            species (np.ndarray): Atomic species (atomic numbers) of shape (N,).
-            cell (np.ndarray or None): Cell matrix for periodic boundary conditions (3, 3).
-                                       Required if `periodic=True`.
-            periodic (bool): If True, consider periodic boundary conditions.
-
-        Returns:
-            dict: A dictionary containing:
-                - "pair_dist": Distances of all valid pairs.
-                - "pair_first": Indices of the first atom in each pair.
-                - "pair_second": Indices of the second atom in each pair.
-                - "pair_coord": Relative coordinates of each pair.
-                - (For periodic systems) "cell_offsets": Cell offset vectors.
-        """
-        from scipy.spatial.distance import cdist
-
-        if len(coordinates) < 2:
-            return {
-                "pair_dist": np.array([]),
-                "pair_first": np.array([]),
-                "pair_second": np.array([]),
-                "pair_coord": np.array([]),
-                "cell_offsets": np.array([]) if periodic else None,
-            }
-
-        # Compute pairwise distances
+        coords = self._to_numpy(coordinates)
+        if coords.shape[0] < 2:
+            return {"pair_dist": np.array([]),
+                    "pair_first": np.array([]),
+                    "pair_second": np.array([]),
+                    "pair_coord": np.array([]),
+                    "cell_offsets": np.array([]) if periodic else None}
         if periodic and cell is not None:
-            # Apply periodic boundary conditions
-            fractional_coords = np.dot(coordinates, np.linalg.inv(cell))
-            fractional_coords = fractional_coords % 1.0
-            cartesian_coords = np.dot(fractional_coords, cell)
-            distances = cdist(cartesian_coords, cartesian_coords)
+            cell_np = self._to_numpy(cell)
+            frac = (coords @ np.linalg.inv(cell_np)) % 1.0
+            cart = frac @ cell_np
+            dists = cdist(cart, cart)
         else:
-            distances = cdist(coordinates, coordinates)
+            dists = cdist(coords, coords)
 
-        # Mask self-distances and filter pairs
-        np.fill_diagonal(distances, np.inf)
-        pair_indices = np.argwhere(distances < self.pair_dist_hard_max)
-        pair_distances = distances[distances < self.pair_dist_hard_max]
-
-        # Extract pairwise information
-        pair_first = pair_indices[:, 0]
-        pair_second = pair_indices[:, 1]
-        pair_coord = coordinates[pair_second] - coordinates[pair_first]
-
-        results = {
-            "pair_dist": pair_distances,
-            "pair_first": pair_first,
-            "pair_second": pair_second,
-            "pair_coord": pair_coord,
-        }
-
+        np.fill_diagonal(dists, np.inf)
+        mask = dists < self.pair_dist_hard_max
+        idx = np.argwhere(mask)
+        pd = dists[mask]
+        first, second = idx[:, 0], idx[:, 1]
+        rel = coords[second] - coords[first]
+        out = {"pair_dist": pd,
+               "pair_first": first,
+               "pair_second": second,
+               "pair_coord": rel}
         if periodic and cell is not None:
-            # Compute cell offsets for periodic systems
-            fractional_offsets = fractional_coords[pair_second] - fractional_coords[pair_first]
-            fractional_offsets = fractional_offsets - np.round(fractional_offsets)
-            cell_offsets = np.dot(fractional_offsets, cell)
-            results["cell_offsets"] = cell_offsets
+            offs = frac[second] - frac[first]
+            offs -= np.round(offs)
+            out["cell_offsets"] = offs @ cell_np
+        return out
 
-        return results
-
-        
-        
     def calculate_min_distance(self, periodic=True):
-        min_distances = []
-
-        for i, structure_coords in enumerate(self.arr_dict[self.coordinates_key]):
-            # Filter out invalid atoms (species == 0)
-            valid_indices = np.where(self.arr_dict[self.species_key][i] != 0)[0]
-            valid_coords = structure_coords[valid_indices]
-            valid_species = self.arr_dict[self.species_key][i][valid_indices]
-            structure_cell = self.arr_dict.get(self.cell_key, None)
-
-            # Skip if fewer than two atoms are present
-            if len(valid_coords) < 2:
-                min_distances.append(np.inf)
+        mins = []
+        species_arr = self._to_numpy(self.arr_dict[self.species_key])
+        coords_arr = self._to_numpy(self.arr_dict[self.coordinates_key])
+        cell_arr = self.arr_dict.get(self.cell_key)
+        for i, sp in enumerate(species_arr):
+            mask = sp != 0
+            valid = mask.sum() >= 2
+            if not valid:
+                mins.append(np.inf)
                 continue
-
-            # Use find_pairs to calculate pairwise distances
-            pairs_result = self.find_pairs(
-                coordinates=valid_coords,
-                species=valid_species,
-                cell=structure_cell[i] if structure_cell is not None else None,
-                periodic=periodic,
-            )
-
-            # Get the minimum distance from pair_dist
-            if pairs_result["pair_dist"].size > 0:
-                min_distances.append(np.min(pairs_result["pair_dist"]))
+            coords = coords_arr[i][mask]
+            cell_i = cell_arr[i] if cell_arr is not None else None
+            pr = self.find_pairs(coords, None, cell=cell_i, periodic=periodic)
+            if pr["pair_dist"].size:
+                mins.append(pr["pair_dist"].min())
             else:
-                min_distances.append(np.inf)  # No pairs found within the cutoff
-
-        self.min_distance = np.array(min_distances)
+                mins.append(np.inf)
+        self.min_distance = np.array(mins)
         return self.min_distance
 
 
-    def calculate_atom_counts(self):
-        """
-        Calculate the count of atoms for each unique atomic number in the entire dataset.
-        
-        Returns:
-        atom_counts: A dictionary mapping each atomic number to its corresponding atom count.
-  
-      """
-        self.extract_unique_numbers_large()
-      
-        self.atom_counts = {}
-        for atomic_number in self.atomic_numbers_in_dataset:
-            count = self.count_atoms_by_type(atomic_number)
-            self.atom_counts[atomic_number] = count
-        return self.atom_counts
+
+
+
+
+
+
+    
+
+
+
 
     def calculate_max_force(self):
-        """
-        Calceulates the maximum force magnitude for each entry and stores it in self.max_force.
-        """
-        forces = self.arr_dict[self.forces_key] 
-        force_magnitudes = np.linalg.norm(forces, axis=2) 
-        max_forces = np.max(force_magnitudes, axis=1) 
-      
-        self.max_force = np.array(max_forces)
-
-    def calculate_E0_regression(self):
-        """
-        Calculates the energy regression for the dataset.
-        """
-        if self.atomic_numbers_in_dataset is None:
-            unique_numbers = self.extract_unique_numbers_large()
+        f = self.arr_dict[self.forces_key]
+        if isinstance(f, torch.Tensor):
+            mags = torch.norm(f, dim=2)
+            self.max_force = mags.max(dim=1).values.cpu().numpy()
         else:
-            unique_numbers = self.atomic_numbers_in_dataset.copy()
-        if 0 not in unique_numbers:
-            unique_numbers = [0] + unique_numbers
-        encoder = OneHotSpecies(unique_numbers)
-        e_per_species = compute_hipnn_e0(encoder,torch.tensor(self.arr_dict[self.species_key]),torch.tensor(self.arr_dict[self.energies_key]),peratom=self.peratom)
-        self.E0_regression = e_per_species.to('cpu').numpy()
-        return self.E0_regression
-
+            arr = self._to_numpy(f)
+            self.max_force = np.linalg.norm(arr, axis=2).max(axis=1)
+        return self.max_force
 
     def calculate_min_force(self):
-        """
-        Calculates the minimum force magnitude for each entry and stores it in self.min_force.
-        """
-        forces = self.arr_dict[self.forces_key]  
-        force_magnitudes = np.linalg.norm(forces, axis=2)  
-        min_forces = np.min(force_magnitudes, axis=1)  
+        f = self.arr_dict[self.forces_key]
+        if isinstance(f, torch.Tensor):
+            mags = torch.norm(f, dim=2)
+            self.min_force = mags.min(dim=1).values.cpu().numpy()
+        else:
+            arr = self._to_numpy(f)
+            self.min_force = np.linalg.norm(arr, axis=2).min(axis=1)
+        return self.min_force
 
-        self.min_force = np.array(min_forces)
-    
     def calculate_densities(self):
-        """
-        Calculates the density for each entry in the dataset.
-    
-        Notes:
-            - Species lists may contain padding represented by zeros, which are excluded
-              from calculations.
-            - If the mass is zero, volume is invalid, or volume is zero, the density is set
-              to `None` (or could be set to `np.nan` to indicate an invalid density).
-        """
         densities = []
-        # Precompute masses for species
-        species_array = self.arr_dict[self.species_key]
-        unique_species = np.unique(species_array.flatten())
-        species_masses = {species: self.get_mass_from_species(species) for species in unique_species}
-    
-        # Iterate over each database entry
-        for species_list, coordinates, cell in zip(
-            self.arr_dict[self.species_key],
-            self.arr_dict[self.coordinates_key],
-            self.arr_dict.get(self.cell_key, [None] * len(self.arr_dict[self.coordinates_key]))
-        ):
-            # Remove zeros (padding)
-            species_list = species_list[species_list != 0]
-            # Compute total mass of entry
-            mass = sum(species_masses.get(species, 0.0) for species in species_list)
-    
-            # Compute volumes
-            volume_results = self.calculate_volume(coordinates, cell=cell)
-            bounding_box_volume = volume_results["bounding_box_volume"]
-            cell_volume = volume_results["cell_volume"]
-    
-            # Prioritize cell volume if available, otherwise use bounding box volume
-            volume = cell_volume if cell_volume is not None else bounding_box_volume
-    
-            # Compute density
-            if mass > 0 and volume is not None and volume > 0:
-                density = mass / volume
-            else:
-                density = None
-    
-            densities.append(density)
-    
-        self.densities = np.array(densities)
+        species_arr = self._to_numpy(self.arr_dict[self.species_key])
+        coords_arr = self._to_numpy(self.arr_dict[self.coordinates_key])
+        cell_arr = self.arr_dict.get(self.cell_key)
+        unique_sp = np.unique(species_arr)
+        sp_masses = {sp: self.get_mass_from_species(int(sp)) for sp in unique_sp}
+        for i, sp in enumerate(species_arr):
+            mask = sp != 0
+            mass = sum(sp_masses[int(x)] for x in sp[mask])
+            vol = self.calculate_volume(coords_arr[i], 
+                        cell=cell_arr[i] if cell_arr is not None else None)
+            V = vol["cell_volume"] or vol["bounding_box_volume"]
+            densities.append((mass / V) if (mass > 0 and V and V > 0) else None)
+        self.densities = np.array(densities, dtype=float)
+        return self.densities
 
+    def calculate_E0_regression(self):
+        nums = self.atomic_numbers_in_dataset or self.extract_unique_numbers_large()
+        if 0 not in nums:
+            nums = [0] + nums
+        encoder = OneHotSpecies(nums)
+        species_t = torch.tensor(self._to_numpy(self.arr_dict[self.species_key]), dtype=torch.long)
+        energies_t = torch.tensor(self._to_numpy(self.arr_dict[self.energies_key]), dtype=torch.float32)
+        e0 = compute_hipnn_e0(encoder, species_t, energies_t, peratom=self.peratom)
+        self.E0_regression = e0.cpu().numpy()
+        return self.E0_regression
 
-    #
-    #   Helper Functions for Search Functions
-    #
-    
+    # ─── Atom Counts & Combinations ────────────────────────────────────────────
+
     def count_atoms_by_type(self, atomic_number):
-        """
-        Counts the total number of atoms with a given atomic_number in the database.
+        arr = self._to_numpy(self.arr_dict[self.species_key])
+        return int((arr == atomic_number).sum())
 
-        Args:
-            atomic_number: The atomic number to count.
-
-        Returns:
-            The total count of atoms with the specified atomic number.
-        """
-        species_array = self.arr_dict[self.species_key]
-        # Count occurrences of atomic number
-        atom_type_count = np.sum(species_array == atomic_number)
-        return atom_type_count
-
-
+    def calculate_atom_counts(self):
+        self.extract_unique_numbers_large()
+        self.atom_counts = {n: self.count_atoms_by_type(n) for n in self.atomic_numbers_in_dataset}
+        return self.atom_counts
 
     def build_entry_species_index(self):
-        """
-        Builds an index that maps species combinations to the indices of entries containing them.
-        """
         self.entry_species_index = defaultdict(list)
-        species_array = self.arr_dict[self.species_key]
-        num_entries = len(species_array)
-        for i in range(num_entries):
-            species = species_array[i]
-            # Remove zeros (padding) and create a sorted tuple of unique species
-            unique_species = tuple(sorted(set(species[species != 0])))
-            self.entry_species_index[unique_species].append(i)
+        arr = self._to_numpy(self.arr_dict[self.species_key])
+        for i, sp in enumerate(arr):
+            combo = tuple(sorted(set(sp[sp != 0])))
+            self.entry_species_index[combo].append(i)
+        return self.entry_species_index
 
-    
-    def generate_custom_priority(self):
-        """
-        Generates a custom priority list of element symbols based on their atomic numbers.
-    
-        Returns:
-            List of element symbols ordsered by their atomic numbers.
-        """
-        atomic_number_to_symbol = self.convert_atomic_number_to_symbol()
-        # Extract and sort atomic numbers
-        sorted_atomic_numbers = sorted(atomic_number_to_symbol.keys())
-        # Map sorted atomic numbers to their symbols
-        return [atomic_number_to_symbol[num] for num in sorted_atomic_numbers]
-
-
-    def split_combined_species(self, combined_species, valid_symbols):
-        """
-        Splits a string of combined species (e.g., 'HCO' or 'ClZn') into valid symbols.
-
-        Args:
-            combined_species (str): The string to split.
-            valid_symbols (set): A set of valid element symbols (e.g., {'H', 'C', 'O', 'Cl', 'Zn'}).
-
-        Returns:
-            list: A list of valid symbols if the split is successful.
-
-        Raises:
-            ValueError: If any part of the string is not a valid element symbol.
-        """
-        # Regular expression to match element symbols (1 uppercase letter, optionally 1 lowercase letter)
-        element_pattern = r'[A-Z][a-z]?'
-        matches = re.findall(element_pattern, combined_species)
-
-        # Ensure all matched symbols are valid
-        for match in matches:
-            if match not in valid_symbols:
-                raise ValueError(
-                    f"Invalid element symbol: '{match}'. Valid elements in this dataset include: {', '.join(valid_symbols)}"
-                )
-
-        return matches
-
-    #
-    #   Search Functions
-    #
+    # ─── Search ────────────────────────────────────────────────────────────────
 
     def search_entries_by_species(self, target_species, exact_match=True, use_symbols=True):
-        """
-        Searches for database entries that contain the specified atomic species.
-
-        Args:
-            target_species (list or set): The atomic species to search for (symbols or atomic numbers).
-            exact_match (bool): If True, finds entries containing exactly the target species.
-                                If False, finds entries containing at least the target species.
-            use_symbols (bool): If True, interprets `target_species` as element symbols.
-
-        Returns:
-            List of indices of matching entries.
-        """
         if self.entry_species_index is None:
             self.build_entry_species_index()
 
         if use_symbols:
-            # Convert element symbols to atomic numbers
-            symbol_to_number = self.convert_symbol_to_atomic_number()
-            # Retrieve valid symbols dynamically from the dataset
-            valid_atomic_numbers = np.unique(self.arr_dict[self.species_key])  # Unique atomic numbers in the dataset
-            valid_symbols = {symbol for symbol, num in symbol_to_number.items() if num in valid_atomic_numbers}
-
-            # Split combined strings into individual symbols
-            expanded_target_species = []
-            for item in target_species:
-                if isinstance(item, str):  # Handle combined strings like 'HCO' or 'ClZn'
-                    expanded_target_species.extend(self.split_combined_species(item, valid_symbols))
+            s2n = self.convert_symbol_to_atomic_number()
+            valid_nums = set(self._to_numpy(self.arr_dict[self.species_key]).flatten())
+            valid_syms = {s for s, n in s2n.items() if n in valid_nums}
+            expanded = []
+            for it in target_species:
+                if isinstance(it, str):
+                    parts = re.findall(r"[A-Z][a-z]?", it)
+                    for p in parts:
+                        if p not in valid_syms:
+                            raise ValueError(f"Invalid symbol {p}")
+                        expanded.append(p)
                 else:
-                    expanded_target_species.append(item)
+                    expanded.append(it)
+            target_nums = [s2n[p] for p in expanded]
+        else:
+            target_nums = list(target_species)
 
-            # Ensure all symbols in the combination are valid
-            invalid_symbols = [symbol for symbol in expanded_target_species if symbol not in valid_symbols]
-            if invalid_symbols:
-                raise ValueError(
-                    f"The element symbol(s): {', '.join(invalid_symbols)} are not found in this dataset. "
-                    f"Found elements in this dataaset include: {', '.join(valid_symbols)}"
-                )
+        tgt = set(target_nums)
+        matches = []
+        for combo, idxs in self.entry_species_index.items():
+            s = set(combo)
+            if (exact_match and s == tgt) or (not exact_match and tgt.issubset(s)):
+                matches += idxs
+        return matches
 
-            # Convert to atomic numbers
-            target_species = [symbol_to_number[symbol] for symbol in expanded_target_species]
-
-        target_species_set = set(target_species)
-        matching_indices = []
-
-        for species_combo, indices in self.entry_species_index.items():
-            species_set = set(species_combo)
-            if exact_match:
-                if species_set == target_species_set:
-                    matching_indices.extend(indices)
-            else:
-                if target_species_set.issubset(species_set):
-                    matching_indices.extend(indices)
-
-        return matching_indices
-
-
-    
     def search_entries_by_max_force(self, force_range):
-        """
-        Searches for entries where the maximum force is within the specified range.
-
-        Args:
-            force_range (list or tuple): A two-element list or tuple specifying the min and max force valueas [min_force, max_force].
-
-        Returns:
-            List of indices of matching entries.
-        """
         if self.max_force is None:
             self.calculate_max_force()
-
-        min_force, max_force = force_range
-
-        # Validate the force_range input
-        if min_force > max_force:
-            raise ValueError("min_force should be less than or equal to max_force.")
-
-        matching_indices = np.where((self.max_force >= min_force) & (self.max_force <= max_force))[0]
-        return matching_indices.tolist()
+        lo, hi = force_range
+        if lo > hi:
+            raise ValueError("min > max")
+        arr = np.array(self.max_force)
+        return np.where((arr >= lo) & (arr <= hi))[0].tolist()
 
     def search_entries_by_distance_range(self, distance_range):
-        """
-        Searches for entries where the minimum or maximum atomic distance is within the specified range.
-    
-        Args:
-            distance_range (list or tuple): A two-element list or tuple specifying the min and max distance values [min_distance, max_distance].
-    
-        Returns:
-            List of indices of matching entries.
-        """
         if self.min_distance is None:
-            # Compute distances if they haven't been calculated yet
             self.calculate_min_distance()
-    
-        if not isinstance(distance_range, (list, tuple)) or len(distance_range) != 2:
-            raise ValueError("distance_range must be a list or tuple with exactly two elements [min_distance, max_distance].")
-    
-        min_distance, max_distance = distance_range
-    
-        # Validate the distance_range input
-        if min_distance > max_distance:
-            raise ValueError("min_distance should be less than or equal to max_distance.")
-    
-        # Ensure min_distance and max_distance are NumPy arrays
-        min_distance_array = np.array(self.min_distance)
-        max_distance_array = np.array(self.max_distance)
-    
-        # Find indices of entries where either min_distance or max_distance falls within the range
-        matching_indices = np.where(
-            (min_distance_array >= min_distance) & (min_distance_array <= max_distance) |
-            (max_distance_array >= min_distance) & (max_distance_array <= max_distance)
-        )[0]
-    
-        return matching_indices.tolist()
+        lo, hi = distance_range
+        if lo > hi:
+            raise ValueError("min > max")
+        mn = np.array(self.min_distance)
+        # no max_distance stored; only min-distance available
+        return np.where((mn >= lo) & (mn <= hi))[0].tolist()
 
-    #
-    #   Get Functions
-    #
+    # ─── Getters & Statistics ──────────────────────────────────────────────────
 
     def get_element_combinations(self):
-        """
-        Returns extracted element combinations with atomic symbols and their frequency.
-        """
         if self.element_combinations is None:
-            raise ValueError("Element combinations not extracted yet. Run 'extract_element_combinations_large()' first.")
-        
-        # Map atomic numbers to element symbols
-        atomic_number_to_symbol = self.convert_atomic_number_to_symbol()
-        result = {}
-        
-        for combination, count in self.element_combinations.items():
-            # Convert atomic numbers to symbols
-            symbols = [atomic_number_to_symbol[num] for num in combination]
-            # Join symbols into a readable string
-            symbol_str = "".join(symbols)
-            result[symbol_str] = count
-    
-        return result
+            raise RuntimeError("Run extract_element_combinations_large() first")
+        num2sym = self.convert_atomic_number_to_symbol()
+        return {"".join(num2sym[n] for n in combo): cnt
+                for combo, cnt in self.element_combinations.items()}
 
     def get_atom_counts_by_symbol(self):
-        """
-        Returns a dictionary smapping element symbols to their counts in the dataset.
-        """
         if self.atom_counts is None:
-            raise ValueError("Atom counts not computed yet. Run 'calculate_atom_counts()' first.")
-        
-        # Map atomic numbers to element symbols
-        atomic_number_to_symbol = self.convert_atomic_number_to_symbol()
-        
-        counts_by_symbol = {}
-        for atomic_number, count in self.atom_counts.items():
-            symbol = atomic_number_to_symbol.get(atomic_number, f"Unknown({atomic_number})")
-            counts_by_symbol[symbol] = count
-        
-        return counts_by_symbol
+            raise RuntimeError("Run calculate_atom_counts() first")
+        num2sym = self.convert_atomic_number_to_symbol()
+        return {num2sym[n]: cnt for n, cnt in self.atom_counts.items()}
 
     def calculate_range(self, data, manual_range):
         if manual_range:
             return manual_range
-        if len(data) > 0:
-            #mean = np.mean(data)
-            #std = np.std(data)
-            #Use IRQ instead
-            dataQ1,dataQ3 = np.percentile(data,[25,75])
-            dataIRQ = dataQ3-dataQ1
-            return dataQ1-2.5*dataIRQ, dataQ3+2.5*dataIRQ
-        return None, None
+        if len(data):
+            q1, q3 = np.percentile(data, [25, 75])
+            iqr = q3 - q1
+            return (q1 - 2.5*iqr, q3 + 2.5*iqr)
+        return (None, None)
 
     def get_density_statistics(self):
-        """
-        Returns statistics (min, max, mean, median, std) for densities across the dataset, including:
-        """
         if self.densities is None:
             self.calculate_densities()
-        
-        # Filter valid densities
-        #valid_densities = [d for d in self.densities if d is not None]
-        valid_densities = self.densities[np.isfinite(self.densities)]
-        densityL,densityH = self.calculate_range(valid_densities,self.density_range)
-        valid_densities = valid_densities[(valid_densities >= densityL) & (valid_densities <= densityH)]
-        
-        if valid_densities.any():
-            min_density = min(valid_densities)
-            max_density = max(valid_densities)
-            mean_density = np.mean(valid_densities)
-            median_density = np.median(valid_densities)
-            std_density = np.std(valid_densities)
-            outliers_density = len(self.densities) - len(valid_densities)
-            
+        vals = self.densities[np.isfinite(self.densities)]
+        lo, hi = self.calculate_range(vals, self.density_range)
+        filt = vals[(vals >= lo) & (vals <= hi)]
+        if filt.size:
             return {
-                "min": min_density,
-                "max": max_density,
-                "mean": mean_density,
-                "median": median_density,
-                "std": std_density,
-                "outliers": outliers_density,
-        }
-        else:
-            return {
-                    "min": None, "max": None, "mean": None, "median": None, "std": None, "outliers": None}  # No valid densities found
+                "min": filt.min(),
+                "max": filt.max(),
+                "mean": filt.mean(),
+                "median": np.median(filt),
+                "std": filt.std(),
+                "outliers": len(self.densities) - len(filt)
+            }
+        return {k: None for k in ("min", "max", "mean", "median", "std", "outliers")}
 
-        
-        
-        
     def get_min_distance_statistics(self):
-        """
-        Returns statistics (min, max, mean, median, std) for minimum atomic distances.
-        """
         if self.min_distance is None:
             self.calculate_min_distance()
-        
-        valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
-        
-        if valid_min_distance:
+        vals = np.array(self.min_distance)
+        vals = vals[np.isfinite(vals)]
+        if vals.size:
             return {
-                "min": np.min(valid_min_distance),
-                "max": np.max(valid_min_distance),
-                "mean": np.mean(valid_min_distance),
-                "median": np.median(valid_min_distance),
-                "std": np.std(valid_min_distance),
+                "min": vals.min(),
+                "max": vals.max(),
+                "mean": vals.mean(),
+                "median": np.median(vals),
+                "std": vals.std()
             }
-        else:
-            return {"min": None, "max": None, "mean": None, "median": None, "std": None}
+        return {k: None for k in ("min", "max", "mean", "median", "std")}
 
     def get_max_force_statistics(self):
-        """
-        Returns statistics (min, max, mean, median, std) for maximum force magnitudes.
-        """
         if self.max_force is None:
             self.calculate_max_force()
-        
-#        valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-        valid_max_force = self.max_force[np.isfinite(self.max_force)]
-        max_forceL,max_forceH = self.calculate_range(valid_max_force, self.max_force_range)
-        valid_max_force = valid_max_force[(valid_max_force >= max_forceL) & (valid_max_force <= max_forceH)]
-        
-        if valid_max_force.any():
+        vals = np.array(self.max_force)
+        vals = vals[np.isfinite(vals)]
+        lo, hi = self.calculate_range(vals, self.max_force_range)
+        filt = vals[(vals >= lo) & (vals <= hi)]
+        if filt.size:
             return {
-                "min": np.min(valid_max_force),
-                "max": np.max(valid_max_force),
-                "mean": np.mean(valid_max_force),
-                "median": np.median(valid_max_force),
-                "std": np.std(valid_max_force),
-                "outliers": len(self.max_force)-len(valid_max_force),
+                "min": filt.min(),
+                "max": filt.max(),
+                "mean": filt.mean(),
+                "median": np.median(filt),
+                "std": filt.std(),
+                "outliers": len(vals) - len(filt),
             }
-        else:
-            return {"min": None, "max": None, "mean": None, "median": None, "std": None, "outliers":None}
+        return {k: None for k in ("min", "max", "mean", "median", "std", "outliers")}
 
     def get_energy_statistics(self):
-        """
-        Returns statistics (min, max, mean, median, std, outliers) for linearly regressed energy values
-        """
-        if self.E0_regression is None: 
-            self.calculate_energy_regression()
-        unique_numbers = self.atomic_numbers_in_dataset.copy()
-        if 0 not in unique_numbers:
-            unique_numbers = [0] + unique_numbers
-        encoder = OneHotSpecies(unique_numbers)
-        encoded_species = encoder(torch.tensor(self.arr_dict[self.species_key]))[0].to(torch.float64)
-        linear_energies = torch.tensordot(encoded_species,torch.tensor(self.E0_regression,dtype=torch.float64),dims=([2],[0])).sum(axis=1)
-        defect_energies = torch.tensor(self.arr_dict[self.energies_key],dtype=torch.float64) - linear_energies
-        defect_energies = defect_energies.to('cpu').numpy()
-        energiesL,energiesH = self.calculate_range(defect_energies,self.energies_range)
-        valid_energies = defect_energies[(defect_energies >= energiesL) & (defect_energies <= energiesH)]
-        if valid_energies.any():
+        if self.E0_regression is None:
+            self.calculate_E0_regression()
+        nums = self.atomic_numbers_in_dataset or self.extract_unique_numbers_large()
+        if 0 not in nums:
+            nums = [0] + nums
+        enc = OneHotSpecies(nums)
+        sp_t = torch.tensor(self._to_numpy(self.arr_dict[self.species_key]), dtype=torch.long)
+        enc_sp = enc(sp_t)[0].to(torch.float64)
+        lin_e = torch.tensordot(enc_sp,
+                                torch.tensor(self.E0_regression, dtype=torch.float64),
+                                dims=([2], [0])
+                                ).sum(dim=1)
+        defects = torch.tensor(self._to_numpy(self.arr_dict[self.energies_key]), dtype=torch.float64) - lin_e
+        arr = defects.cpu().numpy()
+        lo, hi = self.calculate_range(arr, self.energies_range)
+        filt = arr[(arr >= lo) & (arr <= hi)]
+        if filt.size:
             return {
-            "min": np.min(valid_energies),
-            "max": np.max(valid_energies),
-            "mean": np.mean(valid_energies),
-            "median": np.median(valid_energies),
-            "std": np.std(valid_energies),
-            "outliers": len(self.arr_dict[self.energies_key])-len(valid_energies),
+                "min": filt.min(),
+                "max": filt.max(),
+                "mean": filt.mean(),
+                "median": np.median(filt),
+                "std": filt.std(),
+                "outliers": len(arr) - len(filt),
             }
-        else:
-            return {"min": None, "max": None, "mean": None, "median": None, "std": None, "outliers":None}
+        return {k: None for k in ("min", "max", "mean", "median", "std", "outliers")}
+
+    # ─── Populate & Save ──────────────────────────────────────────────────────
+
+    def make_json_serializable(self):
+        def convert(v):
+            if isinstance(v, (np.floating, np.integer)):
+                return v.item()
+            if isinstance(v, np.ndarray):
+                return v.tolist()
+            if isinstance(v, dict):
+                return {k: convert(vv) for k, vv in v.items()}
+            if isinstance(v, list):
+                return [convert(vv) for vv in v]
+            return v
+        return {k: convert(v) for k, v in self.metadata.items()}
+
+    def save_metadata_to_json(self):
+        with open(self.json_filename, "w") as f:
+            json.dump(self.make_json_serializable(), f, indent=4)
+
+    def save_metadata_to_csv(self):
+        flat = {}
+        def _flat(d, prefix=None):
+            for k, v in d.items():
+                key = f"{prefix}_{k}" if prefix else k
+                if isinstance(v, dict):
+                    _flat(v, key)
+                else:
+                    flat[key] = str(v)
+        _flat(self.make_json_serializable())
+        with open(self.csv_filename, "w") as f:
+            for k, v in flat.items():
+                f.write(f"{k},{v}\n")
 
     def populate_metadata(self, update=True, quiet=False):
-        """
-        Calculates entry-level properties and optionally updates global metadata.
-
-        Args:
-            update (bool): Whether to update the global metadata with the calculated values.
-            quiet (bool): If True, suppresses printing of metadata.
-        """
-        # Dictionary to hold metadata updates
-        metadata_updates = {}
-
-        # Calculate entry-level properties with error handling
+        md_upd = {}
         try:
             self.calculate_densities()
-            density_stats = self.get_density_statistics()  # Collect statistics for density
-            metadata_updates["density_statistics"] = density_stats
+            md_upd["density_statistics"] = self.get_density_statistics()
         except Exception as e:
-            if not quiet:
-                print(f"Error calculating densities: {e}")
+            if not quiet: print("Error density:", e)
 
         try:
             self.calculate_max_force()
-            max_force_stats = self.get_max_force_statistics()  # Collect max force statistics
-            metadata_updates["max_force_magnitude_statistics"] = max_force_stats
+            md_upd["max_force_statistics"] = self.get_max_force_statistics()
         except Exception as e:
-            if not quiet:
-                print(f"Error calculating max force statistics: {e}")
+            if not quiet: print("Error max force:", e)
 
-        if True: #try:
+        try:
             self.calculate_E0_regression()
-            energy_stats = self.get_energy_statistics()  # Collect max force statistics
-            metadata_updates["energy_statistics"] = energy_stats
-        else: #except Exception as e:
-            if not quiet:
-                print(f"Error calculating max force statistics: {e}")
+            md_upd["energy_statistics"] = self.get_energy_statistics()
+        except Exception as e:
+            if not quiet: print("Error energy stats:", e)
 
         try:
             self.calculate_min_force()
         except Exception as e:
-            if not quiet:
-                print(f"Error calculating min force: {e}")
+            if not quiet: print("Error min force:", e)
 
         try:
             self.calculate_min_distance()
-            min_distance_stats = self.get_min_distance_statistics()  # Collect min distance statistics
-            metadata_updates["min_atomic_distance_statistics"] = min_distance_stats
+            md_upd["min_distance_statistics"] = self.get_min_distance_statistics()
         except Exception as e:
-            if not quiet:
-                print(f"Error calculating minimum distances: {e}")
+            if not quiet: print("Error min distance:", e)
 
         try:
             self.calculate_atom_counts()
-            metadata_updates["atom_count"] = self.get_atom_counts_by_symbol()
+            md_upd["atom_count"] = self.get_atom_counts_by_symbol()
         except Exception as e:
-            if not quiet:
-                print(f"Error calculating atom counts: {e}")
+            if not quiet: print("Error atom counts:", e)
 
         try:
             self.extract_unique_numbers_large()
-            metadata_updates["atom_count_coincidence"] = self.get_element_combinations()
+            md_upd["element_combinations"] = self.get_element_combinations()
         except Exception as e:
-            if not quiet:
-                print(f"Error extracting unique atomic combinations: {e}")
+            if not quiet: print("Error combinations:", e)
 
-        # Update global metadata
         if update:
-            self.update_metadata(metadata_updates)
+            self.update_metadata(md_upd)
 
-        # Print metadata if not in quiet mode
         if not quiet:
-            print("Metadata:")
-            for key, value in metadata_updates.items():
-                print(f"  {key}: {value}")
+            print("Metadata populated:")
+            for k, v in md_upd.items():
+                print(f"  {k}: {v}")
 
-        # Save metadata to JSON
         if self.write_metadata_to_json:
-            try:
-                self.save_metadata_to_json()
+            try: self.save_metadata_to_json()
             except Exception as e:
-                if not quiet:
-                    print(f"Error saving metadata to JSON: {e}")
+                if not quiet: print("Error saving JSON:", e)
 
-        # Save metadata to JSON
-        if self.write_metadata_to_json:
-            #try:
-            self.save_metadata_to_csv()
-            #except Exception as e:
-            #    if not quiet:
-            #        print(f"Error saving metadata to CSV: {e}")
+        if self.write_metadata_to_csv:
+            try: self.save_metadata_to_csv()
+            except Exception as e:
+                if not quiet: print("Error saving CSV:", e)
 
-    def make_json_serializable(self):
-        """
-        Converts the metadata into a JSON-compatible format.
-        """
-        def convert_value(value):
-            if isinstance(value, (np.float32, np.float64)):
-                return float(value)  # Convert NumPy floats to Python floats
-            elif isinstance(value, (np.int32, np.int64)):
-                return int(value)  # Convert NumPy integers to Python integers
-            elif isinstance(value, np.ndarray):
-                return value.tolist()  # Convert NumPy arrays to lists
-            elif isinstance(value, dict):
-                return {k: convert_value(v) for k, v in value.items()}  # Recursively convert dicts
-            elif isinstance(value, list):
-                return [convert_value(v) for v in value]  # Recursively convert lists
-            else:
-                return value  # Leave other types unchanged
-
-        return {key: convert_value(val) for key, val in self.metadata.items()}
-
-    def save_metadata_to_json(self):
-        """
-        Saves the metadata to a JSON file.
-        Args:
-            filename (str): The name of the JSON file to save.
-        """
-        json_compatible_metadata = self.make_json_serializable()
-        with open(self.json_filename, "w") as f:
-            json.dump(json_compatible_metadata, f, indent=4)
-    
-    def save_metadata_to_csv(self):
-        csv_compatible_metadata={}
-        def flatten_dict(d,path=None):
-            if path is None:
-                path = []
-            for key, value in d.items():
-                current_path = path + [key]
-                if isinstance(value, dict):
-                    flatten_dict(value, current_path)
-                else:
-                    csv_compatible_metadata["_".join(current_path)] = str(value)
-        json_compatible_metadata = self.make_json_serializable()
-        print(json_compatible_metadata)
-        flatten_dict(json_compatible_metadata)
-        with open(self.csv_filename, "w") as f:
-            for key, value in csv_compatible_metadata.items():
-                f.write('{:s},{:s}\n'.format(key,value))
+    # ─── Plotting ──────────────────────────────────────────────────────────────
 
     def plot_distributions(
         self,
         density_range=None,
         max_force_range=None,
         min_distance_range=None,
-        max_distance_range=None,
         bins=None,
-        alpha=None,
+        alpha=None
     ):
         import matplotlib.pyplot as plt
         import numpy as np
     
-        # Ensure densities are calculated
+        def safe_array(arr, label, max_len=10000):
+            """Convert to NumPy, filter NaNs and Infs, and truncate if too long."""
+            arr = np.array(arr, dtype=np.float64)
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                print(f"[Warning] No finite values found for {label}. Skipping plot.")
+            if arr.size > max_len:
+                arr = arr[:max_len]
+            return arr
+    
+        # Ensure data is computed
         if self.densities is None:
             self.calculate_densities()
-    
-        # Ensure max force is calculated
         if self.max_force is None:
             self.calculate_max_force()
-    
-        # Ensure min and max distances are calculated
-        if self.min_distance is None :
+        if self.min_distance is None:
             self.calculate_min_distance()
-
-            
-        # Filter valid values for plotting
-        #valid_densities = [d for d in self.densities if d is not None and np.isfinite(d)]
-        valid_densities = self.densities[np.isfinite(self.densities)]
-        #valid_min_distance = [d for d in self.min_distance if np.isfinite(d)]
-        valid_min_distance = self.min_distance[np.isfinite(self.min_distance)]
-        #valid_max_force = [f for f in self.max_force if np.isfinite(f)]
-        valid_max_force = self.max_force[np.isfinite(self.max_force)]
-        
-        # Calculate ±3 standard deviations for the range
-        #def calculate_range(data, manual_range):
-        #    if manual_range:
-        #        return manual_range
-        #    if len(data) > 0:
-        #        #mean = np.mean(data)
-        #        #std = np.std(data)
-        #        #Use IRQ instead
-        #        dataQ1,dataQ3 = np.percentile(data,[25,75])
-        #        dataIRQ = dataQ3-dataQ1
-        #        return dataQ1-1.5*dataIRQ, dataQ3+1.5*dataIRQ
-        #    return None, None
-
-        # Determine ranges
-        density_range = self.calculate_range(valid_densities, self.density_range) #density_range or self.density_range)
-        max_force_range = self.calculate_range(valid_max_force, self.max_force_range) #max_force_range or self.max_force_range)
-        min_distance_range = self.calculate_range(valid_min_distance, self.min_distance_range) #min_distance_range or self.min_distance_range)
     
-        # Use defaults if bins and alpha are not provided
-        bins = bins or self.bins
-        alpha = alpha or self.alpha
-        
-    # Ensure ranges are valid before plotting
-        def valid_range(range_tuple):
-            return range_tuple if range_tuple[0] is not None and range_tuple[1] is not None else (0, 1)
-
+        # Sanitize arrays
+        dvals = safe_array(self.densities, "densities")
+        fvals = safe_array(self.max_force, "max_force")
+        mvals = safe_array(self.min_distance, "min_distance")
     
-        density_range = valid_range(density_range)
-        max_force_range = valid_range(max_force_range)
-        min_distance_range = valid_range(min_distance_range)
+        # Compute plot ranges
+        dr = self.calculate_range(dvals, density_range or self.density_range)
+        fr = self.calculate_range(fvals, max_force_range or self.max_force_range)
+        mr = self.calculate_range(mvals, min_distance_range or self.min_distance_range)
     
-        fig, axs = plt.subplots(2, 2, figsize=(18, 12))
+        # Use defaults if not provided
+        b = bins or self.bins
+        a = alpha or self.alpha
     
-        # Density Distribution
-        axs[0, 0].hist(valid_densities, bins=bins, alpha=alpha, color='blue')
-        axs[0, 0].set_title("Density Distribution")
-        axs[0, 0].set_xlabel("Density")
-        axs[0, 0].set_ylabel("Frequency")
-        if density_range[0] is not None:
-            axs[0, 0].set_xlim(density_range)
-
-        # Force Magnitude Distribution
-        axs[0, 1].hist(valid_max_force, bins=bins, alpha=alpha, color='orange')
-        axs[0, 1].set_title("Maximum Force Magnitude Distribution")
-        axs[0, 1].set_xlabel("Force Magnitude")
-        axs[0, 1].set_ylabel("Frequency")
-        if max_force_range[0] is not None:
-            axs[0, 1].set_xlim(max_force_range)
-
-        # Min Distance Distribution
-        axs[1, 0].hist(valid_min_distance, bins=bins, alpha=alpha, color='green')
-        axs[1, 0].set_title("Min Pairwise Atomic Distance Distribution")
-        axs[1, 0].set_xlabel("Min Pairwise Distance")
-        axs[1, 0].set_ylabel("Frequency")
-        if min_distance_range[0] is not None:
-            axs[1, 0].set_xlim(min_distance_range)
-
+        # Start plotting
+        fig, axs = plt.subplots(2, 2, figsize=(16, 12))
     
-        # Atom Counts by Symbol
-        atom_counts_by_symbol = self.get_atom_counts_by_symbol()  
-        symbols = list(atom_counts_by_symbol.keys())
-        counts = list(atom_counts_by_symbol.values())
+        if dvals.size:
+            axs[0, 0].hist(dvals, bins=b, alpha=a)
+            axs[0, 0].set(title="Density Distribution", xlabel="Density", ylabel="Count")
+            axs[0, 0].set_xlim(dr)
+        else:
+            axs[0, 0].set(title="Density: No Data")
     
-        axs[1, 1].bar(symbols, counts, color='skyblue', alpha=alpha)
-        axs[1, 1].set_title("Atom Counts by Symbol")
-        axs[1, 1].set_xlabel("Element Symbol")
-        axs[1, 1].set_ylabel("Atom Count")
-        for i, count in enumerate(counts):
-            axs[1, 1].text(i, count, f"{count:,}", ha='center', va='bottom', fontsize=10)
+        if fvals.size:
+            axs[0, 1].hist(fvals, bins=b, alpha=a)
+            axs[0, 1].set(title="Max Force Distribution", xlabel="Force", ylabel="Count")
+            axs[0, 1].set_xlim(fr)
+        else:
+            axs[0, 1].set(title="Max Force: No Data")
     
+        if mvals.size:
+            axs[1, 0].hist(mvals, bins=b, alpha=a)
+            axs[1, 0].set(title="Min Distance Distribution", xlabel="Distance", ylabel="Count")
+            axs[1, 0].set_xlim(mr)
+        else:
+            axs[1, 0].set(title="Min Distance: No Data")
+    
+        # Atom counts
+        counts = self.get_atom_counts_by_symbol()
+        if counts:
+            syms, cnts = zip(*counts.items())
+            axs[1, 1].bar(syms, cnts, alpha=a)
+            axs[1, 1].set(title="Atom Counts by Symbol", xlabel="Element", ylabel="Count")
+        else:
+            axs[1, 1].set(title="Atom Counts: No Data")
     
         plt.tight_layout()
-        plt.savefig("database_distribution.png") 
         plt.show()
+    
+    
+
