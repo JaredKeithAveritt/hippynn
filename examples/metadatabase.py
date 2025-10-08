@@ -1,3 +1,4 @@
+
 import os
 #os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" # i think this can be removed, This is for when I had issues in Windows Subsystem for Linux 
 
@@ -80,6 +81,7 @@ import sys
 
 #can toggle between a h5 (ani) and npz (Al) database on lines 86, 87
 
+from hippynn.databases.metadatabase import MetaDatabase
 db_info = {"inputs": inputs , "targets": targets}
 
 meta_database = MetaDatabase(
