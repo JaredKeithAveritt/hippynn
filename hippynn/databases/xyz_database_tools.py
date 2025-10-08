@@ -1,3 +1,5 @@
+# Need to add function to read_extxyz()
+
 from pathlib import Path
 import numpy as np
 import torch  # needed by the function
